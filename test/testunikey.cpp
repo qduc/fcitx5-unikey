@@ -1881,7 +1881,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
         testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("e"), false);
         testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("Return"), false);
 
-        config.setValueByPath("ModifySurroundingText", "True");
+        config.setValueByPath("ImmediateCommit", "True");
         unikey->setConfig(config);
 
         ic->reset();
@@ -1914,7 +1914,6 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
 
         // Immediate commit mode: commit on every keystroke, rebuilding from
         // surrounding text and replacing the previous word.
-        config.setValueByPath("ModifySurroundingText", "False");
         config.setValueByPath("ImmediateCommit", "True");
         unikey->setConfig(config);
 
@@ -1945,8 +1944,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
 
         // Regression: ModifySurroundingText with cursor==0 should not underflow
         // when attempting to inspect the character before cursor.
-        config.setValueByPath("ImmediateCommit", "False");
-        config.setValueByPath("ModifySurroundingText", "True");
+        config.setValueByPath("ImmediateCommit", "True");
         unikey->setConfig(config);
 
         ic->reset();
@@ -1958,7 +1956,6 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
 
         // Immediate commit mode fallback: when surrounding text is unavailable,
         // rely on local history to rebuild and transform the last committed word.
-        config.setValueByPath("ModifySurroundingText", "False");
         config.setValueByPath("ImmediateCommit", "True");
         unikey->setConfig(config);
 

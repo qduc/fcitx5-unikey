@@ -221,7 +221,6 @@ public:
         // sense.
         // conflict with the rebuildPreedit feature
         if (!*engine_->config().surroundingText ||
-            *engine_->config().modifySurroundingText ||
             *engine_->config().oc != UkConv::XUTF8) {
             return;
         }
@@ -417,8 +416,7 @@ public:
     // After rebuild preedit, make sure nothing else calls commit
     void rebuildPreedit() {
         // Also enable this path for immediate commit.
-        bool immediate = immediateCommitMode();
-        if (!*engine_->config().modifySurroundingText && !immediate) {
+        if (!immediateCommitMode()) {
             return;
         }
 
@@ -679,9 +677,7 @@ void UnikeyState::preedit(KeyEvent &keyEvent) {
         // (like consonant - phu am) if macro enabled, then not auto commit.
         // Because macro may change any word
         if (!immediateCommit && !*engine_->config().macro &&
-            (uic_.isAtWordBeginning() || autoCommit_) &&
-            // conflict with the rebuildPreedit feature
-            !*engine_->config().modifySurroundingText) {
+            (uic_.isAtWordBeginning() || autoCommit_)) {
             if (isWordAutoCommit(sym)) {
                 uic_.putChar(sym);
                 autoCommit_ = true;
