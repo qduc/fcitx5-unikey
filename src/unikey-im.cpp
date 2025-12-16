@@ -212,6 +212,10 @@ public:
         lastShiftPressed_ = FcitxKey_None;
     }
 
+    void clearLocalHistory() {
+        lastCommittedWord_.clear();
+    }
+
     void rebuildFromSurroundingBeforeCommit() {
         surroundingCharsToDelete_ = 0;
 
@@ -223,20 +227,49 @@ public:
         // just committed.
         ic_->updateSurroundingText();
 
-        if (!ic_->surroundingText().isValid() ||
+        // If there is an active selection, avoid rebuild/delete/recommit logic.
+        // The application will typically replace the selection on commit, and
+        // using a local fallback here is likely to corrupt surrounding text.
+        if (ic_->surroundingText().isValid() &&
             !ic_->surroundingText().selectedText().empty()) {
             return;
         }
 
+        if (ic_->surroundingText().isValid() &&
+            !ic_->surroundingText().selectedText().empty()) {
+            // If text is selected, we should not try to rebuild from surrounding text
+            // or local history. The new character should simply replace the selection.
+            return;
+        }
+
+        bool useLocalBuffer = false;
+        if (!ic_->surroundingText().isValid()) {
+            // history if available.
+            if (lastCommittedWord_.empty()) {
+                return;
+            }
+            useLocalBuffer = true;
+        }
+
+        std::string textBuf;
+        int cursor = 0;
+
+        if (useLocalBuffer) {
+            textBuf = lastCommittedWord_;
+            cursor = utf8::lengthValidated(textBuf);
+        } else {
+            textBuf = ic_->surroundingText().text();
+            cursor = ic_->surroundingText().cursor();
+        }
+
         // Rebuild from the last word (already committed) before the cursor.
         // We'll delete it during commit and re-commit the transformed result.
-        const auto &text = ic_->surroundingText().text();
-        auto cursor = ic_->surroundingText().cursor();
+        const auto &text = textBuf;
         auto length = utf8::lengthValidated(text);
         if (length == utf8::INVALID_LENGTH) {
             return;
         }
-        if (cursor > length) {
+        if (cursor < 0 || cursor > length) {
             return;
         }
 
@@ -356,7 +389,7 @@ public:
         if (length == utf8::INVALID_LENGTH) {
             return;
         }
-        if (cursor <= 0 && cursor > length) {
+        if (cursor <= 0 || cursor > length) {
             return;
         }
 
@@ -433,7 +466,7 @@ public:
         if (length == utf8::INVALID_LENGTH) {
             return;
         }
-        if (cursor <= 0 && cursor > length) {
+        if (cursor <= 0 || cursor > length) {
             return;
         }
 
@@ -486,6 +519,7 @@ private:
     bool autoCommit_ = false;
     KeySym lastShiftPressed_ = FcitxKey_None;
     size_t surroundingCharsToDelete_ = 0;
+    std::string lastCommittedWord_;
 };
 
 UnikeyEngine::UnikeyEngine(Instance *instance)
@@ -579,6 +613,10 @@ UnikeyEngine::UnikeyEngine(Instance *instance)
             auto *ic = icEvent.inputContext();
             auto *state = ic->propertyFor(&factory_);
             state->mayRebuildStateFromSurroundingText_ = true;
+            // The cursor might have moved or text changed efficiently.
+            // Clear local history as it is likely stale and we shouldn't rely on it
+            // for "blind" rebuilding anymore.
+            state->clearLocalHistory();
         }));
 
     reloadConfig();
@@ -822,6 +860,7 @@ void UnikeyEngine::reset(const InputMethodEntry & /*entry*/,
                          InputContextEvent &event) {
     auto *state = event.inputContext()->propertyFor(&factory_);
     state->reset();
+    state->clearLocalHistory();
     if (event.type() == EventType::InputContextReset) {
         if (event.inputContext()->capabilityFlags().test(
                 CapabilityFlag::SurroundingText)) {
@@ -914,6 +953,10 @@ void UnikeyState::handleIgnoredKey() {
     uic_.filter(0);
     syncState();
     commit();
+    // Any "ignored" key (navigation, enter, delete, ctrl combos...) may change
+    // cursor position or document state. Invalidate local history so we don't
+    // rebuild from stale text when surrounding text is unavailable.
+    clearLocalHistory();
 }
 
 void UnikeyState::commit() {
@@ -924,6 +967,9 @@ void UnikeyState::commit() {
     }
     if (!preeditStr_.empty()) {
         ic_->commitString(preeditStr_);
+        // In immediate commit mode, the "preedit" string is what we just committed.
+        // Save it to local history to support clients with broken surrounding text.
+        lastCommittedWord_ = preeditStr_;
     }
     reset();
 }
