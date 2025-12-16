@@ -15,6 +15,7 @@
 #include "vnconv.h"
 #include "vnlexi.h"
 #include <cassert>
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -301,9 +302,15 @@ public:
         // If there is an active selection, avoid rebuild/delete/recommit logic.
         // The application will typically replace the selection on commit, and
         // rebuilding would corrupt surrounding text.
+        // However, if the selection is purely forward (e.g. auto-suggestion),
+        // we can still safely modify the text before the cursor.
         if (ic_->surroundingText().isValid() &&
             !ic_->surroundingText().selectedText().empty()) {
-            return 0;
+            auto cursor = ic_->surroundingText().cursor();
+            auto anchor = ic_->surroundingText().anchor();
+            if (std::min(cursor, anchor) < cursor) {
+                return 0;
+            }
         }
 
         if (!ic_->surroundingText().isValid()) {
