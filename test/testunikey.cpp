@@ -1912,6 +1912,37 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
         testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("s"), false);
         testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("Return"), false);
 
+        // Immediate commit mode: commit on every keystroke, rebuilding from
+        // surrounding text and replacing the previous word.
+        config.setValueByPath("ModifySurroundingText", "False");
+        config.setValueByPath("ImmediateCommit", "True");
+        unikey->setConfig(config);
+
+        ic->reset();
+        ic->surroundingText().setText("", 0, 0);
+        ic->updateSurroundingText();
+
+        // The test frontend doesn't automatically mirror committed text back
+        // into surrounding text, so we simulate the application's surrounding
+        // updates between keystrokes.
+        testfrontend->call<ITestFrontend::pushCommitExpectation>("a");
+        testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
+        ic->surroundingText().setText("a", 1, 1);
+        ic->updateSurroundingText();
+
+        testfrontend->call<ITestFrontend::pushCommitExpectation>("â");
+        testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
+        ic->surroundingText().setText("â", 1, 1);
+        ic->updateSurroundingText();
+
+        testfrontend->call<ITestFrontend::pushCommitExpectation>("ấ");
+        testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("s"), false);
+        ic->surroundingText().setText("ấ", 1, 1);
+        ic->updateSurroundingText();
+
+        testfrontend->call<ITestFrontend::pushCommitExpectation>("ấ ");
+        testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
+
         instance->deactivate();
         dispatcher->schedule([dispatcher, instance]() {
             dispatcher->detach();
