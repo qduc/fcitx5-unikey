@@ -144,8 +144,7 @@ public:
             return;
         }
 
-        if (keyEvent.key().isSimple() &&
-            !keyEvent.rawKey().check(FcitxKey_space)) {
+        if (keyEvent.key().isSimple()) {
             rebuildPreedit();
         }
         preedit(keyEvent);
@@ -308,7 +307,6 @@ public:
         }
 
         if (!ic_->surroundingText().isValid()) {
-            // Don't fallback to local buffer - it's prone to bugs due to blind guessing.
             // If surrounding text is unavailable, skip rebuild to avoid corrupting text.
             return 0;
         }
@@ -321,7 +319,7 @@ public:
         if (length == utf8::INVALID_LENGTH) {
             return 0;
         }
-        if (cursor < 0 || cursor > length) {
+        if (cursor > length) {
             return 0;
         }
 
@@ -844,12 +842,12 @@ void UnikeyState::handleIgnoredKey() {
     commit();
 }
 
-    void commit() {
-        if (!preeditStr_.empty()) {
-            ic_->commitString(preeditStr_);
-        }
-        reset();
+void UnikeyState::commit() {
+    if (!preeditStr_.empty()) {
+        ic_->commitString(preeditStr_);
     }
+    reset();
+}
 
 void UnikeyState::syncState(KeySym sym) {
     // process result of ukengine

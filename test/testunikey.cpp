@@ -1954,25 +1954,6 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
         testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
         testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("Return"), false);
 
-        // Immediate commit mode fallback: when surrounding text is unavailable,
-        // rely on local history to rebuild and transform the last committed word.
-        config.setValueByPath("ImmediateCommit", "True");
-        unikey->setConfig(config);
-
-        ic->reset();
-        // Do NOT mirror committed text into surrounding text here. Some clients
-        // (e.g. Firefox on Wayland) may not provide valid surrounding text.
-        testfrontend->call<ITestFrontend::pushCommitExpectation>("a");
-        testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
-        testfrontend->call<ITestFrontend::pushCommitExpectation>("â");
-        testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
-
-        // Navigation keys should invalidate local history so we don't rebuild
-        // from stale text after cursor movement.
-        testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("Left"), false);
-        testfrontend->call<ITestFrontend::pushCommitExpectation>("s");
-        testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("s"), false);
-
         instance->deactivate();
         dispatcher->schedule([dispatcher, instance]() {
             dispatcher->detach();
