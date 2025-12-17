@@ -1,6 +1,7 @@
 
 set( fcitx_unikey_sources
     unikey-im.cpp
+    unikey-state.cpp
     unikey-utils.cpp
     unikey-surrounding-text.cpp
     )

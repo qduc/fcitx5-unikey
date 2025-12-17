@@ -6,6 +6,7 @@
  */
 
 #include "unikey-im.h"
+#include "unikey-state.h"
 #include "unikey-utils.h"
 #include "unikey-constants.h"
 #include "unikey-log.h"
