@@ -147,6 +147,12 @@ void UnikeyState::preedit(KeyEvent &keyEvent) {
     }
     if (sym == FcitxKey_BackSpace) {
         if (immediateCommitMode()) {
+            ic_->updateSurroundingText();
+            if (ic_->surroundingText().isValid() &&
+                !ic_->surroundingText().selectedText().empty()) {
+                reset();
+                return;
+            }
             // Immediate-commit mode: just delete one character and reset state.
             ic_->deleteSurroundingText(-1, 1);
             reset();

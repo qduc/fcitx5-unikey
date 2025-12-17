@@ -1954,6 +1954,37 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
         testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
         testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("Return"), false);
 
+        // Regression test for browser omnibox double character insertion.
+        // If there is an active selection (e.g. auto-suggestion), Unikey should NOT try to
+        // rebuild state/delete surrounding, because it often conflicts with the browser's behavior.
+        // Instead, it should just commit the new character.
+        config.setValueByPath("ImmediateCommit", "True");
+        unikey->setConfig(config);
+
+        ic->reset();
+        // Simulate "e" typed, "xample" auto-completed and selected.
+        // Text: "example" (7 chars).
+        // Cursor at 1 (after 'e'). Selection from 1 to 7 ("xample").
+        ic->surroundingText().setText("example", 1, 7);
+        ic->updateSurroundingText();
+
+        // Expect simple commit of "x" without trying to delete "e" or rebuild "ex".
+        testfrontend->call<ITestFrontend::pushCommitExpectation>("x");
+        testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("x"), false);
+
+        // Bug #2 test: Backspace with selection should NOT be consumed.
+        // When text is selected and user presses backspace, Unikey should let
+        // the application handle deletion of the selected text.
+        ic->reset();
+        // Simulate "hello" typed, entire text selected.
+        ic->surroundingText().setText("hello", 0, 5);
+        ic->updateSurroundingText();
+
+        // Backspace should pass through (not filtered) when there's a selection.
+        // The test frontend logs "KeyEvent key: BackSpace ... accepted: 0" when not filtered.
+        // We don't push a commit expectation because nothing should be committed.
+        testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("BackSpace"), false);
+
         instance->deactivate();
         dispatcher->schedule([dispatcher, instance]() {
             dispatcher->detach();
