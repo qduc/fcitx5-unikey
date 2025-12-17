@@ -1,6 +1,8 @@
 
 set( fcitx_unikey_sources
     unikey-im.cpp
+    unikey-utils.cpp
+    unikey-surrounding-text.cpp
     )
 
 add_fcitx5_addon(unikey ${fcitx_unikey_sources})

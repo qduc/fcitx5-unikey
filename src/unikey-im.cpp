@@ -12,6 +12,9 @@
 #include "unikey-config.h"
 #include "unikeyinputcontext.h"
 #include "usrkeymap.h"
+#include "unikey-utils.h"
+#include "unikey-constants.h"
+#include "unikey-log.h"
 #include "vnconv.h"
 #include "vnlexi.h"
 #include <cassert>
@@ -50,20 +53,14 @@
 #include <memory>
 #include <string>
 #include <string_view>
-#include <unordered_map>
-#include <unordered_set>
 #include <vector>
-
-#define FCITX_UNIKEY_DEBUG() FCITX_LOGC(::fcitx::unikey, Debug)
 
 namespace fcitx {
 
-namespace {
-
 FCITX_DEFINE_LOG_CATEGORY(unikey, "unikey");
 
-constexpr auto CONVERT_BUF_SIZE = 1024;
-constexpr auto MAX_LENGTH_VNWORD = 7;
+namespace {
+
 const unsigned int Unikey_OC[] = {CONV_CHARSET_XUTF8,  CONV_CHARSET_TCVN3,
                                   CONV_CHARSET_VNIWIN, CONV_CHARSET_VIQR,
                                   CONV_CHARSET_BKHCM2, CONV_CHARSET_UNI_CSTRING,
@@ -71,384 +68,77 @@ const unsigned int Unikey_OC[] = {CONV_CHARSET_XUTF8,  CONV_CHARSET_TCVN3,
 constexpr unsigned int NUM_OUTPUTCHARSET = FCITX_ARRAY_SIZE(Unikey_OC);
 static_assert(NUM_OUTPUTCHARSET == UkConvI18NAnnotation::enumLength);
 
-bool isWordBreakSym(unsigned char c) { return WordBreakSyms.contains(c); }
-
-bool isWordAutoCommit(unsigned char c) {
-    static const std::unordered_set<unsigned char> WordAutoCommit = {
-        '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'b', 'c',
-        'f', 'g', 'h', 'j', 'k', 'l', 'm', 'n', 'p', 'q', 'r', 's',
-        't', 'v', 'x', 'z', 'B', 'C', 'F', 'G', 'H', 'J', 'K', 'L',
-        'M', 'N', 'P', 'Q', 'R', 'S', 'T', 'V', 'X', 'Z'};
-    return WordAutoCommit.contains(c);
-}
-
-VnLexiName charToVnLexi(uint32_t ch) {
-    static const std::unordered_map<uint32_t, VnLexiName> map = []() {
-        std::unordered_map<uint32_t, VnLexiName> result;
-        for (int i = 0; i < vnl_lastChar; i++) {
-            result.insert({UnicodeTable[i], static_cast<VnLexiName>(i)});
-        }
-        return result;
-    }();
-
-    if (auto search = map.find(ch); search != map.end()) {
-        return search->second;
-    }
-    return vnl_nonVnChar;
-}
-
-bool isVnChar(uint32_t ch) { return charToVnLexi(ch) != vnl_nonVnChar; }
-
-// code from x-unikey, for convert charset that not is XUtf-8
-int latinToUtf(unsigned char *dst, const unsigned char *src, int inSize,
-               int *pOutSize) {
-    int i;
-    int outLeft;
-    unsigned char ch;
-
-    outLeft = *pOutSize;
-
-    for (i = 0; i < inSize; i++) {
-        ch = *src++;
-        if (ch < 0x80) {
-            outLeft -= 1;
-            if (outLeft >= 0) {
-                *dst++ = ch;
-            }
-        } else {
-            outLeft -= 2;
-            if (outLeft >= 0) {
-                *dst++ = (0xC0 | ch >> 6);
-                *dst++ = (0x80 | (ch & 0x3F));
-            }
-        }
-    }
-
-    *pOutSize = outLeft;
-    return (outLeft >= 0);
-}
-
 } // namespace
 
-class UnikeyState final : public InputContextProperty {
-public:
-    UnikeyState(UnikeyEngine *engine, InputContext *ic)
-        : engine_(engine), uic_(engine->im()), ic_(ic) {}
+UnikeyState::UnikeyState(UnikeyEngine *engine, InputContext *ic)
+    : engine_(engine), uic_(engine->im()), ic_(ic) {}
 
-    void keyEvent(KeyEvent &keyEvent) {
-        // Ignore all key release.
-        if (keyEvent.isRelease()) {
-            if (keyEvent.rawKey().check(FcitxKey_Shift_L) ||
-                keyEvent.rawKey().check(FcitxKey_Shift_R)) {
-                lastShiftPressed_ = FcitxKey_None;
-            }
-            return;
+void UnikeyState::keyEvent(KeyEvent &keyEvent) {
+    // Ignore all key release.
+    if (keyEvent.isRelease()) {
+        if (keyEvent.rawKey().check(FcitxKey_Shift_L) ||
+            keyEvent.rawKey().check(FcitxKey_Shift_R)) {
+            lastShiftPressed_ = FcitxKey_None;
         }
-
-        if (keyEvent.key().isSimple()) {
-            rebuildPreedit();
-        }
-        preedit(keyEvent);
-
-        // check last keyevent with shift
-        if (keyEvent.rawKey().sym() >= FcitxKey_space &&
-            keyEvent.rawKey().sym() <= FcitxKey_asciitilde) {
-            lastKeyWithShift_ =
-                keyEvent.rawKey().states().test(KeyState::Shift);
-        } else {
-            lastKeyWithShift_ = false;
-        } // end check last keyevent with shift
-    }
-    void preedit(KeyEvent &keyEvent);
-
-    // A function for handling the key that is ignored by unikey and should
-    // commit the buffer.
-    void handleIgnoredKey();
-    void commit();
-    void syncState(KeySym sym = FcitxKey_None);
-    void updatePreedit();
-
-    bool immediateCommitMode() const {
-        if (!*engine_->config().immediateCommit) {
-            return false;
-        }
-        // This mode relies on reading and modifying surrounding text.
-        if (*engine_->config().oc != UkConv::XUTF8) {
-            return false;
-        }
-        if (!ic_->capabilityFlags().test(CapabilityFlag::SurroundingText)) {
-            return false;
-        }
-        return true;
+        return;
     }
 
-    void eraseChars(int num_chars) {
-        int i;
-        int k;
-        unsigned char c;
-        k = num_chars;
-
-        for (i = preeditStr_.length() - 1; i >= 0 && k > 0; i--) {
-            c = preeditStr_.at(i);
-
-            // count down if byte is begin byte of utf-8 char
-            if (c < (unsigned char)'\x80' || c >= (unsigned char)'\xC0') {
-                k--;
-            }
-        }
-
-        preeditStr_.erase(i + 1);
+    if (keyEvent.key().isSimple()) {
+        rebuildPreedit();
     }
+    preedit(keyEvent);
 
-    void reset() {
-        uic_.resetBuf();
-        preeditStr_.clear();
-        updatePreedit();
-        lastShiftPressed_ = FcitxKey_None;
+    // check last keyevent with shift
+    if (keyEvent.rawKey().sym() >= FcitxKey_space &&
+        keyEvent.rawKey().sym() <= FcitxKey_asciitilde) {
+        lastKeyWithShift_ =
+            keyEvent.rawKey().states().test(KeyState::Shift);
+    } else {
+        lastKeyWithShift_ = false;
+    } // end check last keyevent with shift
+}
+
+bool UnikeyState::immediateCommitMode() const {
+    if (!*this->engine_->config().immediateCommit) {
+        return false;
     }
+    // This mode relies on reading and modifying surrounding text.
+    if (*this->engine_->config().oc != UkConv::XUTF8) {
+        return false;
+    }
+    if (!ic_->capabilityFlags().test(CapabilityFlag::SurroundingText)) {
+        return false;
+    }
+    return true;
+}
 
+void UnikeyState::eraseChars(int num_chars) {
+    int i;
+    int k;
+    unsigned char c;
+    k = num_chars;
 
+    for (i = preeditStr_.length() - 1; i >= 0 && k > 0; i--) {
+        c = preeditStr_.at(i);
 
-
-    void rebuildFromSurroundingText() {
-        if (mayRebuildStateFromSurroundingText_) {
-            mayRebuildStateFromSurroundingText_ = false;
-        } else {
-            return;
-        }
-
-        // Check if output charset is utf8, otherwise it doesn't make much
-        // sense.
-        // conflict with the rebuildPreedit feature
-        if (!*engine_->config().surroundingText ||
-            *engine_->config().oc != UkConv::XUTF8) {
-            return;
-        }
-
-        if (!uic_.isAtWordBeginning()) {
-            return;
-        }
-
-        if (!ic_->capabilityFlags().test(CapabilityFlag::SurroundingText) ||
-            !ic_->surroundingText().isValid()) {
-            return;
-        }
-        // We need the character before the cursor.
-        const auto &text = ic_->surroundingText().text();
-        auto cursor = ic_->surroundingText().cursor();
-        auto length = utf8::lengthValidated(text);
-        if (length == utf8::INVALID_LENGTH) {
-            return;
-        }
-        if (cursor <= 0 || cursor > length) {
-            return;
-        }
-
-        uint32_t lastCharBeforeCursor;
-        auto start = utf8::nextNChar(text.begin(), cursor - 1);
-        auto end = utf8::getNextChar(start, text.end(), &lastCharBeforeCursor);
-        if (lastCharBeforeCursor == utf8::INVALID_CHAR ||
-            lastCharBeforeCursor == utf8::NOT_ENOUGH_SPACE) {
-            return;
-        }
-
-        const auto isValidStateCharacter = [](char c) {
-            return isWordAutoCommit(c) && !charutils::isdigit(c);
-        };
-
-        if (std::distance(start, end) != 1 ||
-            !isValidStateCharacter(lastCharBeforeCursor)) {
-            return;
-        }
-
-        // Reverse search for word auto commit.
-        // all char for isWordAutoCommit == true would be ascii.
-        while (start != text.begin() && isValidStateCharacter(*start) &&
-               std::distance(start, end) < MAX_LENGTH_VNWORD) {
-            --start;
-        }
-
-        // The loop will move the character on to an invalid character, if it
-        // doesn't by pass the start point. Need to add by one to move it to the
-        // starting point we expect.
-        if (!isValidStateCharacter(*start)) {
-            ++start;
-        }
-
-        assert(isValidStateCharacter(*start) && start >= text.begin());
-
-        // Check if surrounding is not in a bigger part of word.
-        if (start != text.begin()) {
-            auto chr = utf8::getLastChar(text.begin(), start);
-            if (isVnChar(chr)) {
-                return;
-            }
-        }
-
-        FCITX_UNIKEY_DEBUG()
-            << "Rebuild surrounding with: \""
-            << std::string_view(&*start, std::distance(start, end)) << "\"";
-        for (; start != end; ++start) {
-            uic_.putChar(*start);
-            autoCommit_ = true;
+        // count down if byte is begin byte of utf-8 char
+        if (c < (unsigned char)'\x80' || c >= (unsigned char)'\xC0') {
+            k--;
         }
     }
 
-    size_t rebuildStateFromSurrounding(bool deleteSurrounding) {
-        // Ask the frontend to refresh surrounding text so we can see what was
-        // just committed.
-        ic_->updateSurroundingText();
+    preeditStr_.erase(i + 1);
+}
 
-        // If there is an active selection, avoid rebuild/delete/recommit logic.
-        // The application will typically replace the selection on commit, and
-        // rebuilding would corrupt surrounding text.
-        // However, if the selection is purely forward (e.g. auto-suggestion),
-        // we can still safely modify the text before the cursor.
-        if (ic_->surroundingText().isValid() &&
-            !ic_->surroundingText().selectedText().empty()) {
-            auto cursor = ic_->surroundingText().cursor();
-            auto anchor = ic_->surroundingText().anchor();
-            if (std::min(cursor, anchor) < cursor) {
-                return 0;
-            }
-        }
+void UnikeyState::reset() {
+    uic_.resetBuf();
+    preeditStr_.clear();
+    updatePreedit();
+    lastShiftPressed_ = FcitxKey_None;
+}
 
-        if (!ic_->surroundingText().isValid()) {
-            // If surrounding text is unavailable, skip rebuild to avoid corrupting text.
-            return 0;
-        }
-
-        // Rebuild from the last word (already committed) before the cursor.
-        // We'll delete it during commit and re-commit the transformed result.
-        const auto &text = ic_->surroundingText().text();
-        auto cursor = ic_->surroundingText().cursor();
-        auto length = utf8::lengthValidated(text);
-        if (length == utf8::INVALID_LENGTH) {
-            return 0;
-        }
-        if (cursor > length) {
-            return 0;
-        }
-
-        // Collect last contiguous "word" before cursor with a length cap.
-        // - ASCII characters are treated as part of the word as long as they're
-        //   not a word-break symbol.
-        // - Non-ASCII characters must be Vietnamese letters understood by
-        //   vnlexi.
-        struct RebuildItem {
-            bool isAscii;
-            unsigned char ascii;
-            VnLexiName vn;
-        };
-
-        std::vector<RebuildItem> items;
-        items.reserve(MAX_LENGTH_VNWORD + 1);
-
-        size_t startCharacter = 0;
-        if (cursor >= static_cast<decltype(cursor)>(MAX_LENGTH_VNWORD + 1)) {
-            startCharacter = cursor - MAX_LENGTH_VNWORD - 1;
-        }
-
-        auto start = utf8::nextNChar(text.begin(), startCharacter);
-        auto end = utf8::nextNChar(start, cursor - startCharacter);
-
-        auto segmentStart = start;
-        auto iter = start;
-        while (iter != end) {
-            uint32_t unicode = 0;
-            auto next = utf8::getNextChar(iter, end, &unicode);
-            if (unicode == utf8::INVALID_CHAR || unicode == utf8::NOT_ENOUGH_SPACE) {
-                return 0;
-            }
-
-            bool ok = false;
-            RebuildItem item;
-            if (unicode < 0x80) {
-                auto c = static_cast<unsigned char>(unicode);
-                if (!isWordBreakSym(c)) {
-                    ok = true;
-                    item.isAscii = true;
-                    item.ascii = c;
-                    item.vn = vnl_nonVnChar;
-                }
-            } else {
-                auto ch = charToVnLexi(unicode);
-                if (ch != vnl_nonVnChar) {
-                    ok = true;
-                    item.isAscii = false;
-                    item.ascii = 0;
-                    item.vn = ch;
-                }
-            }
-
-            if (!ok) {
-                items.clear();
-                segmentStart = next;
-            } else {
-                items.push_back(item);
-            }
-            iter = next;
-        }
-
-        const size_t wordLength = items.size();
-        if (wordLength == 0 || wordLength > MAX_LENGTH_VNWORD) {
-            return 0;
-        }
-
-        // Reset local composing buffer and engine state before rebuilding.
-        uic_.resetBuf();
-        preeditStr_.clear();
-
-        // Rebuild ukengine state and our composing string by replaying the
-        // current word. For ASCII characters we need filtering, otherwise the
-        // engine won't recognize sequences like "aa" -> "â".
-        for (const auto &item : items) {
-            if (item.isAscii) {
-                uic_.filter(item.ascii);
-                syncState(static_cast<KeySym>(item.ascii));
-            } else {
-                uic_.rebuildChar(item.vn);
-                syncState();
-            }
-        }
-
-        if (deleteSurrounding) {
-            ic_->deleteSurroundingText(-static_cast<int>(wordLength), static_cast<int>(wordLength));
-        }
-        return wordLength;
-    }
-
-    // After rebuild preedit, make sure nothing else calls commit
-    void rebuildPreedit() {
-        // Also enable this path for immediate commit.
-        if (!immediateCommitMode()) {
-            return;
-        }
-
-        if (*engine_->config().oc != UkConv::XUTF8) {
-            return;
-        }
-
-        if (!uic_.isAtWordBeginning()) {
-            return;
-        }
-
-        if (rebuildStateFromSurrounding(true)) {
-            updatePreedit();
-        }
-    }
-
-    bool mayRebuildStateFromSurroundingText_ = false;
-
-private:
-    UnikeyEngine *engine_;
-    UnikeyInputContext uic_;
-    InputContext *ic_;
-    bool lastKeyWithShift_ = false;
-    std::string preeditStr_;
-    bool autoCommit_ = false;
-    KeySym lastShiftPressed_ = FcitxKey_None;
-};
+// Implementations of surrounding text rebuild functions are in
+// unikey-surrounding-text.cpp
 
 UnikeyEngine::UnikeyEngine(Instance *instance)
     : instance_(instance), factory_([this](InputContext &ic) {
@@ -646,7 +336,7 @@ void UnikeyState::preedit(KeyEvent &keyEvent) {
 
         // change tone position after press backspace
         if (uic_.bufChars() > 0) {
-            if (engine_->config().oc.value() == UkConv::XUTF8) {
+            if (this->engine_->config().oc.value() == UkConv::XUTF8) {
                 preeditStr_.append(reinterpret_cast<const char *>(uic_.buf()),
                                    uic_.bufChars());
             } else {
@@ -681,7 +371,7 @@ void UnikeyState::preedit(KeyEvent &keyEvent) {
         // auto commit word that never need to change later in preedit string
         // (like consonant - phu am) if macro enabled, then not auto commit.
         // Because macro may change any word
-        if (!immediateCommit && !*engine_->config().macro &&
+        if (!immediateCommit && !*this->engine_->config().macro &&
             (uic_.isAtWordBeginning() || autoCommit_)) {
             if (isWordAutoCommit(sym)) {
                 uic_.putChar(sym);
@@ -690,9 +380,9 @@ void UnikeyState::preedit(KeyEvent &keyEvent) {
             }
         } // end auto commit
 
-        if ((*engine_->config().im == UkTelex ||
-             *engine_->config().im == UkSimpleTelex2) &&
-            !*engine_->config().process_w_at_begin &&
+        if ((*this->engine_->config().im == UkTelex ||
+             *this->engine_->config().im == UkSimpleTelex2) &&
+            !*this->engine_->config().process_w_at_begin &&
             uic_.isAtWordBeginning() &&
             (sym == FcitxKey_w || sym == FcitxKey_W)) {
             if (immediateCommit) {
@@ -703,7 +393,7 @@ void UnikeyState::preedit(KeyEvent &keyEvent) {
                 return;
             }
             uic_.putChar(sym);
-            if (!*engine_->config().macro) {
+            if (!*this->engine_->config().macro) {
                 return;
             }
             preeditStr_.append(sym == FcitxKey_w ? "w" : "W");
@@ -867,7 +557,7 @@ void UnikeyState::syncState(KeySym sym) {
     }
 
     if (uic_.bufChars() > 0) {
-        if (*engine_->config().oc == UkConv::XUTF8) {
+        if (*this->engine_->config().oc == UkConv::XUTF8) {
             preeditStr_.append(reinterpret_cast<const char *>(uic_.buf()),
                                uic_.bufChars());
         } else {
@@ -894,7 +584,7 @@ void UnikeyState::updatePreedit() {
         const auto useClientPreedit =
             ic_->capabilityFlags().test(CapabilityFlag::Preedit);
         Text preedit(preeditStr_,
-                     useClientPreedit && *engine_->config().displayUnderline
+                     useClientPreedit && *this->engine_->config().displayUnderline
                          ? TextFormatFlag::Underline
                          : TextFormatFlag::NoFlag);
         preedit.setCursor(preeditStr_.size());
