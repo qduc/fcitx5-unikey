@@ -25,25 +25,36 @@
 namespace fcitx {
 
 void UnikeyState::rebuildFromSurroundingText() {
+    FCITX_UNIKEY_DEBUG() << "[rebuildFromSurroundingText] Called, flag=" << mayRebuildStateFromSurroundingText_;
+
     if (mayRebuildStateFromSurroundingText_) {
         mayRebuildStateFromSurroundingText_ = false;
     } else {
+        FCITX_UNIKEY_DEBUG() << "[rebuildFromSurroundingText] Flag not set, returning";
         return;
     }
 
     // Check if output charset is utf8, otherwise it doesn't make much sense.
     // conflict with the rebuildPreedit feature
-    if (!*engine_->config().surroundingText ||
-        *engine_->config().oc != UkConv::XUTF8) {
+    if (!*engine_->config().surroundingText) {
+        FCITX_UNIKEY_DEBUG() << "[rebuildFromSurroundingText] Surrounding text disabled";
+        return;
+    }
+
+    if (*engine_->config().oc != UkConv::XUTF8) {
+        FCITX_UNIKEY_DEBUG() << "[rebuildFromSurroundingText] Surrounding text "
+                                "is not XUTF8";
         return;
     }
 
     if (!uic_.isAtWordBeginning()) {
+        FCITX_UNIKEY_DEBUG() << "[rebuildFromSurroundingText] Not at word beginning";
         return;
     }
 
     if (!ic_->capabilityFlags().test(CapabilityFlag::SurroundingText) ||
         !ic_->surroundingText().isValid()) {
+        FCITX_UNIKEY_DEBUG() << "[rebuildFromSurroundingText] SurroundingText capability not available or invalid";
         return;
     }
 
@@ -51,6 +62,7 @@ void UnikeyState::rebuildFromSurroundingText() {
     // The application will typically replace the selection on commit, and
     // rebuilding would corrupt surrounding text or cause double characters.
     if (!ic_->surroundingText().selectedText().empty()) {
+        FCITX_UNIKEY_DEBUG() << "[rebuildFromSurroundingText] Text selected, avoiding rebuild";
         return;
     }
 
@@ -58,10 +70,15 @@ void UnikeyState::rebuildFromSurroundingText() {
     const auto &text = ic_->surroundingText().text();
     auto cursor = ic_->surroundingText().cursor();
     auto length = utf8::lengthValidated(text);
+    FCITX_UNIKEY_DEBUG() << "[rebuildFromSurroundingText] Text: \"" << text
+                         << "\" cursor: " << cursor << " length: " << length;
+
     if (length == utf8::INVALID_LENGTH) {
+        FCITX_UNIKEY_DEBUG() << "[rebuildFromSurroundingText] Invalid UTF8 length";
         return;
     }
     if (cursor <= 0 || cursor > length) {
+        FCITX_UNIKEY_DEBUG() << "[rebuildFromSurroundingText] Cursor out of range";
         return;
     }
 
@@ -70,6 +87,7 @@ void UnikeyState::rebuildFromSurroundingText() {
     auto end = utf8::getNextChar(start, text.end(), &lastCharBeforeCursor);
     if (lastCharBeforeCursor == utf8::INVALID_CHAR ||
         lastCharBeforeCursor == utf8::NOT_ENOUGH_SPACE) {
+        FCITX_UNIKEY_DEBUG() << "[rebuildFromSurroundingText] Invalid char before cursor";
         return;
     }
 
@@ -79,6 +97,7 @@ void UnikeyState::rebuildFromSurroundingText() {
 
     if (std::distance(start, end) != 1 ||
         !isValidStateCharacter(lastCharBeforeCursor)) {
+        FCITX_UNIKEY_DEBUG() << "[rebuildFromSurroundingText] Last char not valid for auto commit";
         return;
     }
 
@@ -102,12 +121,13 @@ void UnikeyState::rebuildFromSurroundingText() {
     if (start != text.begin()) {
         auto chr = utf8::getLastChar(text.begin(), start);
         if (isVnChar(chr)) {
+            FCITX_UNIKEY_DEBUG() << "[rebuildFromSurroundingText] Part of Vietnamese word, skipping";
             return;
         }
     }
 
     FCITX_UNIKEY_DEBUG()
-        << "Rebuild surrounding with: \""
+        << "[rebuildFromSurroundingText] Rebuild surrounding with: \""
         << std::string_view(&*start, std::distance(start, end)) << "\"";
     for (; start != end; ++start) {
         uic_.putChar(*start);
@@ -116,6 +136,8 @@ void UnikeyState::rebuildFromSurroundingText() {
 }
 
 size_t UnikeyState::rebuildStateFromSurrounding(bool deleteSurrounding) {
+    FCITX_UNIKEY_DEBUG() << "[rebuildStateFromSurrounding] Called with deleteSurrounding=" << deleteSurrounding;
+
     // Ask the frontend to refresh surrounding text so we can see what was
     // just committed.
     ic_->updateSurroundingText();
@@ -125,12 +147,14 @@ size_t UnikeyState::rebuildStateFromSurrounding(bool deleteSurrounding) {
     // rebuilding would corrupt surrounding text.
     if (ic_->surroundingText().isValid() &&
         !ic_->surroundingText().selectedText().empty()) {
+        FCITX_UNIKEY_DEBUG() << "[rebuildStateFromSurrounding] Text selected, skipping rebuild";
         return 0;
     }
 
     if (!ic_->surroundingText().isValid()) {
         // If surrounding text is unavailable, skip rebuild to avoid corrupting
         // text.
+        FCITX_UNIKEY_DEBUG() << "[rebuildStateFromSurrounding] Surrounding text invalid";
         return 0;
     }
 
@@ -139,10 +163,15 @@ size_t UnikeyState::rebuildStateFromSurrounding(bool deleteSurrounding) {
     const auto &text = ic_->surroundingText().text();
     auto cursor = ic_->surroundingText().cursor();
     auto length = utf8::lengthValidated(text);
+    FCITX_UNIKEY_DEBUG() << "[rebuildStateFromSurrounding] Text: \"" << text
+                         << "\" cursor: " << cursor << " length: " << length;
+
     if (length == utf8::INVALID_LENGTH) {
+        FCITX_UNIKEY_DEBUG() << "[rebuildStateFromSurrounding] Invalid UTF8 length";
         return 0;
     }
     if (cursor > length) {
+        FCITX_UNIKEY_DEBUG() << "[rebuildStateFromSurrounding] Cursor beyond text length";
         return 0;
     }
 
@@ -206,28 +235,41 @@ size_t UnikeyState::rebuildStateFromSurrounding(bool deleteSurrounding) {
     }
 
     const size_t wordLength = items.size();
+    FCITX_UNIKEY_DEBUG() << "[rebuildStateFromSurrounding] Collected word length: " << wordLength;
+
     if (wordLength == 0 || wordLength > MAX_LENGTH_VNWORD) {
+        FCITX_UNIKEY_DEBUG() << "[rebuildStateFromSurrounding] Word length invalid, skipping";
         return 0;
     }
 
     // Reset local composing buffer and engine state before rebuilding.
+    FCITX_UNIKEY_DEBUG() << "[rebuildStateFromSurrounding] Resetting engine and preedit, rebuilding word";
     uic_.resetBuf();
     preeditStr_.clear();
 
     // Rebuild ukengine state and our composing string by replaying the
     // current word. For ASCII characters we need filtering, otherwise the
     // engine won't recognize sequences like "aa" -> "â".
+    size_t itemCount = 0;
     for (const auto &item : items) {
         if (item.isAscii) {
+            FCITX_UNIKEY_DEBUG() << "[rebuildStateFromSurrounding] Replaying ASCII: " << item.ascii;
             uic_.filter(item.ascii);
             syncState(static_cast<KeySym>(item.ascii));
         } else {
+            FCITX_UNIKEY_DEBUG() << "[rebuildStateFromSurrounding] Replaying Vietnamese char";
             uic_.rebuildChar(item.vn);
             syncState();
         }
+        itemCount++;
     }
 
+    FCITX_UNIKEY_DEBUG() << "[rebuildStateFromSurrounding] Rebuilt preedit: \"" << preeditStr_
+                         << "\" from " << itemCount << " items";
+
     if (deleteSurrounding) {
+        FCITX_UNIKEY_DEBUG() << "[rebuildStateFromSurrounding] Deleting surrounding text: -"
+                             << wordLength << " " << wordLength;
         ic_->deleteSurroundingText(-static_cast<int>(wordLength),
                                    static_cast<int>(wordLength));
     }
@@ -235,21 +277,31 @@ size_t UnikeyState::rebuildStateFromSurrounding(bool deleteSurrounding) {
 }
 
 void UnikeyState::rebuildPreedit() {
+    FCITX_UNIKEY_DEBUG() << "[rebuildPreedit] Called";
+
     // Also enable this path for immediate commit.
     if (!immediateCommitMode()) {
+        FCITX_UNIKEY_DEBUG() << "[rebuildPreedit] Immediate commit mode not available";
         return;
     }
 
     if (*engine_->config().oc != UkConv::XUTF8) {
+        FCITX_UNIKEY_DEBUG() << "[rebuildPreedit] Output charset is not XUTF8";
         return;
     }
 
     if (!uic_.isAtWordBeginning()) {
+        FCITX_UNIKEY_DEBUG() << "[rebuildPreedit] Not at word beginning";
         return;
     }
 
-    if (rebuildStateFromSurrounding(true)) {
+    FCITX_UNIKEY_DEBUG() << "[rebuildPreedit] Attempting to rebuild from surrounding";
+    size_t wordLen = rebuildStateFromSurrounding(true);
+    if (wordLen > 0) {
+        FCITX_UNIKEY_DEBUG() << "[rebuildPreedit] Rebuilt " << wordLen << " chars, updating preedit";
         updatePreedit();
+    } else {
+        FCITX_UNIKEY_DEBUG() << "[rebuildPreedit] No word rebuilt";
     }
 }
 

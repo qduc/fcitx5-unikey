@@ -51,6 +51,11 @@ void UnikeyState::keyEvent(KeyEvent &keyEvent) {
         return;
     }
 
+    FCITX_UNIKEY_DEBUG() << "[keyEvent] Key: " << keyEvent.rawKey().sym()
+                         << " Shift: " << keyEvent.rawKey().states().test(KeyState::Shift)
+                         << " Ctrl: " << keyEvent.rawKey().states().test(KeyState::Ctrl)
+                         << " Alt: " << keyEvent.rawKey().states().test(KeyState::Alt);
+
     if (keyEvent.key().isSimple()) {
         rebuildPreedit();
     }
@@ -68,15 +73,20 @@ void UnikeyState::keyEvent(KeyEvent &keyEvent) {
 
 bool UnikeyState::immediateCommitMode() const {
     if (!*this->engine_->config().immediateCommit) {
+        FCITX_UNIKEY_DEBUG() << "[immediateCommitMode] Disabled in config";
         return false;
     }
     // This mode relies on reading and modifying surrounding text.
     if (*this->engine_->config().oc != UkConv::XUTF8) {
+        FCITX_UNIKEY_DEBUG() << "[immediateCommitMode] Output charset is not XUTF8, is: "
+                             << static_cast<int>(*this->engine_->config().oc);
         return false;
     }
     if (!ic_->capabilityFlags().test(CapabilityFlag::SurroundingText)) {
+        FCITX_UNIKEY_DEBUG() << "[immediateCommitMode] SurroundingText capability not available";
         return false;
     }
+    FCITX_UNIKEY_DEBUG() << "[immediateCommitMode] ENABLED";
     return true;
 }
 
@@ -85,6 +95,9 @@ void UnikeyState::eraseChars(int num_chars) {
     int k;
     unsigned char c;
     k = num_chars;
+
+    FCITX_UNIKEY_DEBUG() << "[eraseChars] Erasing " << num_chars
+                         << " chars from preedit: \"" << preeditStr_ << "\"";
 
     for (i = preeditStr_.length() - 1; i >= 0 && k > 0; i--) {
         c = preeditStr_.at(i);
@@ -96,9 +109,11 @@ void UnikeyState::eraseChars(int num_chars) {
     }
 
     preeditStr_.erase(i + 1);
+    FCITX_UNIKEY_DEBUG() << "[eraseChars] After erase: \"" << preeditStr_ << "\"";
 }
 
 void UnikeyState::reset() {
+    FCITX_UNIKEY_DEBUG() << "[reset] Resetting state, clearing preedit";
     uic_.resetBuf();
     preeditStr_.clear();
     updatePreedit();
@@ -109,6 +124,9 @@ void UnikeyState::preedit(KeyEvent &keyEvent) {
     auto sym = keyEvent.rawKey().sym();
     auto state = keyEvent.rawKey().states();
 
+    FCITX_UNIKEY_DEBUG() << "[preedit] Processing key " << sym
+                         << " Current preedit: \"" << preeditStr_ << "\"";
+
     // We try to detect Press and release of two different shift.
     // The sequence we want to detect is:
     if (keyEvent.rawKey().check(FcitxKey_Shift_L) ||
@@ -117,6 +135,7 @@ void UnikeyState::preedit(KeyEvent &keyEvent) {
             lastShiftPressed_ = keyEvent.rawKey().sym();
         } else if (lastShiftPressed_ != keyEvent.rawKey().sym()) {
             // Another shift is pressed, do restore Key.
+            FCITX_UNIKEY_DEBUG() << "[preedit] Shift+Shift detected, restoring keystrokes";
             uic_.restoreKeyStrokes();
             syncState(keyEvent.rawKey().sym());
             updatePreedit();
@@ -135,25 +154,32 @@ void UnikeyState::preedit(KeyEvent &keyEvent) {
         sym == FcitxKey_KP_Enter ||
         (sym >= FcitxKey_Home && sym <= FcitxKey_Insert) ||
         (sym >= FcitxKey_KP_Home && sym <= FcitxKey_KP_Delete)) {
+        FCITX_UNIKEY_DEBUG() << "[preedit] Handling ignored key";
         handleIgnoredKey();
         return;
     }
     if (state.test(KeyState::Super)) {
+        FCITX_UNIKEY_DEBUG() << "[preedit] Super key pressed, ignoring";
         return;
     }
     if ((sym >= FcitxKey_Caps_Lock && sym <= FcitxKey_Hyper_R) ||
         sym == FcitxKey_Shift_L || sym == FcitxKey_Shift_R) {
+        FCITX_UNIKEY_DEBUG() << "[preedit] Modifier key, ignoring";
         return;
     }
     if (sym == FcitxKey_BackSpace) {
+        FCITX_UNIKEY_DEBUG() << "[preedit] BackSpace pressed";
         if (immediateCommitMode()) {
+            FCITX_UNIKEY_DEBUG() << "[preedit] BackSpace in immediate commit mode";
             ic_->updateSurroundingText();
             if (ic_->surroundingText().isValid() &&
                 !ic_->surroundingText().selectedText().empty()) {
+                FCITX_UNIKEY_DEBUG() << "[preedit] Text selected, resetting";
                 reset();
                 return;
             }
             // Immediate-commit mode: just delete one character and reset state.
+            FCITX_UNIKEY_DEBUG() << "[preedit] Deleting surrounding text (-1, 1)";
             ic_->deleteSurroundingText(-1, 1);
             reset();
             keyEvent.filterAndAccept();
@@ -163,11 +189,16 @@ void UnikeyState::preedit(KeyEvent &keyEvent) {
         // capture BackSpace
         uic_.backspacePress();
 
+        FCITX_UNIKEY_DEBUG() << "[preedit] BackSpace processing: backspaces=" << uic_.backspaces()
+                             << " preeditLen=" << preeditStr_.length();
+
         if (uic_.backspaces() == 0 || preeditStr_.empty()) {
+            FCITX_UNIKEY_DEBUG() << "[preedit] No backspaces or empty preedit, committing";
             commit();
             return;
         }
         if (static_cast<int>(preeditStr_.length()) <= uic_.backspaces()) {
+            FCITX_UNIKEY_DEBUG() << "[preedit] Clearing preedit";
             preeditStr_.clear();
             autoCommit_ = true;
         } else {
@@ -176,6 +207,7 @@ void UnikeyState::preedit(KeyEvent &keyEvent) {
 
         // change tone position after press backspace
         if (uic_.bufChars() > 0) {
+            FCITX_UNIKEY_DEBUG() << "[preedit] Engine output buffer has " << uic_.bufChars() << " chars";
             if (this->engine_->config().oc.value() == UkConv::XUTF8) {
                 preeditStr_.append(reinterpret_cast<const char *>(uic_.buf()),
                                    uic_.bufChars());
@@ -190,6 +222,7 @@ void UnikeyState::preedit(KeyEvent &keyEvent) {
 
             autoCommit_ = false;
         }
+        FCITX_UNIKEY_DEBUG() << "[preedit] After BackSpace, preedit: \"" << preeditStr_ << "\"";
         updatePreedit();
 
         keyEvent.filterAndAccept();
@@ -201,10 +234,13 @@ void UnikeyState::preedit(KeyEvent &keyEvent) {
     }
     if (sym >= FcitxKey_space && sym <= FcitxKey_asciitilde) {
         // capture ascii printable char
+        FCITX_UNIKEY_DEBUG() << "[preedit] Printable char: " << static_cast<char>(sym)
+                             << " (code: " << sym << ")";
         uic_.setCapsState(state.test(KeyState::Shift),
                           state.test(KeyState::CapsLock));
 
         const bool immediateCommit = immediateCommitMode();
+        FCITX_UNIKEY_DEBUG() << "[preedit] ImmediateCommit mode: " << immediateCommit;
 
         // process sym
 
@@ -214,6 +250,7 @@ void UnikeyState::preedit(KeyEvent &keyEvent) {
         if (!immediateCommit && !*this->engine_->config().macro &&
             (uic_.isAtWordBeginning() || autoCommit_)) {
             if (isWordAutoCommit(sym)) {
+                FCITX_UNIKEY_DEBUG() << "[preedit] Auto-committing word-beginning character";
                 uic_.putChar(sym);
                 autoCommit_ = true;
                 return;
@@ -226,12 +263,14 @@ void UnikeyState::preedit(KeyEvent &keyEvent) {
             uic_.isAtWordBeginning() &&
             (sym == FcitxKey_w || sym == FcitxKey_W)) {
             if (immediateCommit) {
+                FCITX_UNIKEY_DEBUG() << "[preedit] W at word beginning in immediate commit mode";
                 uic_.putChar(sym);
                 syncState(sym);
                 commit();
                 keyEvent.filterAndAccept();
                 return;
             }
+            FCITX_UNIKEY_DEBUG() << "[preedit] W at word beginning (normal mode)";
             uic_.putChar(sym);
             if (!*this->engine_->config().macro) {
                 return;
@@ -247,8 +286,10 @@ void UnikeyState::preedit(KeyEvent &keyEvent) {
         // shift + space, shift + shift event
         if (!lastKeyWithShift_ && state.test(KeyState::Shift) &&
             sym == FcitxKey_space && !uic_.isAtWordBeginning()) {
+            FCITX_UNIKEY_DEBUG() << "[preedit] Shift+Space detected, restoring keystrokes";
             uic_.restoreKeyStrokes();
         } else {
+            FCITX_UNIKEY_DEBUG() << "[preedit] Filtering char through unikey engine";
             uic_.filter(sym);
         }
         // end shift + space
@@ -257,6 +298,7 @@ void UnikeyState::preedit(KeyEvent &keyEvent) {
         syncState(sym);
 
         if (immediateCommit) {
+            FCITX_UNIKEY_DEBUG() << "[preedit] ImmediateCommit: committing \"" << preeditStr_ << "\"";
             commit();
             keyEvent.filterAndAccept();
             return;
@@ -265,6 +307,7 @@ void UnikeyState::preedit(KeyEvent &keyEvent) {
         // commit string: if need
         if (!preeditStr_.empty()) {
             if (preeditStr_.back() == sym && isWordBreakSym(sym)) {
+                FCITX_UNIKEY_DEBUG() << "[preedit] Word break symbol detected, committing \"" << preeditStr_ << "\"";
                 commit();
                 keyEvent.filterAndAccept();
                 return;
@@ -272,6 +315,7 @@ void UnikeyState::preedit(KeyEvent &keyEvent) {
         }
         // end commit string
 
+        FCITX_UNIKEY_DEBUG() << "[preedit] After processing, preedit: \"" << preeditStr_ << "\"";
         updatePreedit();
         keyEvent.filterAndAccept();
         return;
@@ -282,6 +326,7 @@ void UnikeyState::preedit(KeyEvent &keyEvent) {
 }
 
 void UnikeyState::handleIgnoredKey() {
+    FCITX_UNIKEY_DEBUG() << "[handleIgnoredKey] Processing ignored key";
     uic_.filter(0);
     syncState();
     commit();
@@ -289,15 +334,24 @@ void UnikeyState::handleIgnoredKey() {
 
 void UnikeyState::commit() {
     if (!preeditStr_.empty()) {
+        FCITX_UNIKEY_DEBUG() << "[commit] Committing string: \"" << preeditStr_ << "\"";
         ic_->commitString(preeditStr_);
+    } else {
+        FCITX_UNIKEY_DEBUG() << "[commit] Preedit is empty, nothing to commit";
     }
     reset();
 }
 
 void UnikeyState::syncState(KeySym sym) {
     // process result of ukengine
+    FCITX_UNIKEY_DEBUG() << "[syncState] Engine backspaces: " << uic_.backspaces()
+                         << " bufChars: " << uic_.bufChars()
+                         << " keySymbol: " << sym;
+
     if (uic_.backspaces() > 0) {
+        FCITX_UNIKEY_DEBUG() << "[syncState] Backspaces requested: " << uic_.backspaces();
         if (static_cast<int>(preeditStr_.length()) <= uic_.backspaces()) {
+            FCITX_UNIKEY_DEBUG() << "[syncState] Clearing entire preedit";
             preeditStr_.clear();
         } else {
             eraseChars(uic_.backspaces());
@@ -305,6 +359,7 @@ void UnikeyState::syncState(KeySym sym) {
     }
 
     if (uic_.bufChars() > 0) {
+        FCITX_UNIKEY_DEBUG() << "[syncState] Engine output: " << uic_.bufChars() << " chars";
         if (*this->engine_->config().oc == UkConv::XUTF8) {
             preeditStr_.append(reinterpret_cast<const char *>(uic_.buf()),
                                uic_.bufChars());
@@ -315,15 +370,20 @@ void UnikeyState::syncState(KeySym sym) {
             latinToUtf(buf, uic_.buf(), uic_.bufChars(), &bufSize);
             preeditStr_.append((const char *)buf, CONVERT_BUF_SIZE - bufSize);
         }
+        FCITX_UNIKEY_DEBUG() << "[syncState] After append: \"" << preeditStr_ << "\"";
     } else if (sym != FcitxKey_Shift_L && sym != FcitxKey_Shift_R &&
                sym != FcitxKey_None) // if ukengine not process
     {
+        FCITX_UNIKEY_DEBUG() << "[syncState] Engine didn't process, appending raw symbol: " << sym;
         preeditStr_.append(utf8::UCS4ToUTF8(sym));
+        FCITX_UNIKEY_DEBUG() << "[syncState] After raw append: \"" << preeditStr_ << "\"";
     }
     // end process result of ukengine
 }
 
 void UnikeyState::updatePreedit() {
+    FCITX_UNIKEY_DEBUG() << "[updatePreedit] Updating preedit: \"" << preeditStr_ << "\"";
+
     auto &inputPanel = ic_->inputPanel();
 
     inputPanel.reset();
@@ -331,6 +391,8 @@ void UnikeyState::updatePreedit() {
     if (!preeditStr_.empty()) {
         const auto useClientPreedit =
             ic_->capabilityFlags().test(CapabilityFlag::Preedit);
+        FCITX_UNIKEY_DEBUG() << "[updatePreedit] Using " << (useClientPreedit ? "client" : "server")
+                             << " preedit";
         Text preedit(preeditStr_,
                      useClientPreedit && *this->engine_->config().displayUnderline
                          ? TextFormatFlag::Underline
@@ -341,6 +403,8 @@ void UnikeyState::updatePreedit() {
         } else {
             inputPanel.setPreedit(preedit);
         }
+    } else {
+        FCITX_UNIKEY_DEBUG() << "[updatePreedit] Preedit is empty";
     }
     ic_->updatePreedit();
     ic_->updateUserInterface(UserInterfaceComponent::InputPanel);
