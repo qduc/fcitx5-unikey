@@ -25,7 +25,7 @@ public:
 
     void keyEvent(KeyEvent &keyEvent);
     void clearImmediateCommitHistory();
-    void preedit(KeyEvent &keyEvent);
+    void preedit(KeyEvent &keyEvent, bool allowImmediateCommitForThisKey);
     void handleIgnoredKey();
     void commit();
     void syncState(KeySym sym = FcitxKey_None);

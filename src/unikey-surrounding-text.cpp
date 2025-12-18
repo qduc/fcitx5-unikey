@@ -74,6 +74,61 @@ static void replayItemsToEngine(UnikeyInputContext &uic,
     FCITX_UNIKEY_DEBUG() << "[rebuild] Replayed " << itemCount << " items";
 }
 
+// Probe the last contiguous "word" before cursor, without mutating UnikeyState.
+// This is used to detect when surrounding text becomes reliable again while we
+// are in the "unreliable" state (where we must not rewrite/delete text).
+static size_t probeWordLengthFromSurrounding(const SurroundingText &st) {
+    if (!st.isValid() || !st.selectedText().empty()) {
+        return 0;
+    }
+
+    const auto &text = st.text();
+    auto cursor = st.cursor();
+    auto length = utf8::lengthValidated(text);
+    if (length == utf8::INVALID_LENGTH) {
+        return 0;
+    }
+    if (cursor > length) {
+        return 0;
+    }
+
+    // Collect last contiguous rebuildable segment before cursor.
+    size_t startCharacter = 0;
+    if (cursor >= static_cast<decltype(cursor)>(MAX_LENGTH_VNWORD + 1)) {
+        startCharacter = cursor - MAX_LENGTH_VNWORD - 1;
+    }
+
+    auto start = utf8::nextNChar(text.begin(), startCharacter);
+    auto end = utf8::nextNChar(start, cursor - startCharacter);
+
+    std::vector<RebuildItem> items;
+    items.reserve(MAX_LENGTH_VNWORD + 1);
+
+    auto iter = start;
+    while (iter != end) {
+        uint32_t unicode = 0;
+        auto next = utf8::getNextChar(iter, end, &unicode);
+        if (unicode == utf8::INVALID_CHAR || unicode == utf8::NOT_ENOUGH_SPACE) {
+            return 0;
+        }
+
+        RebuildItem item;
+        bool ok = isRebuildableUnicode(unicode, item);
+        if (!ok) {
+            items.clear();
+        } else {
+            items.push_back(item);
+        }
+        iter = next;
+    }
+
+    const size_t wordLength = items.size();
+    if (wordLength == 0 || wordLength > MAX_LENGTH_VNWORD) {
+        return 0;
+    }
+    return wordLength;
+}
+
 } // namespace
 
 void UnikeyState::rebuildFromSurroundingText() {
@@ -430,9 +485,17 @@ void UnikeyState::rebuildPreedit(KeySym upcomingSym) {
     FCITX_UNIKEY_DEBUG() << "[rebuildPreedit] Called upcomingSym=" << upcomingSym;
 
     // Also enable this path for immediate commit.
-    if (!immediateCommitMode() && !*engine_->config().modifySurroundingText) {
-        FCITX_UNIKEY_DEBUG() << "[rebuildPreedit] Immediate commit mode not "
-                                "available or modifySurroundingText disabled";
+    // NOTE: When surroundingTextUnreliable_ is true, immediateCommitMode() is
+    // intentionally disabled. We still want to *probe* surrounding text to
+    // allow recovery, but we must not rewrite/delete surrounding nor mutate
+    // composing state.
+    if (!*engine_->config().immediateCommit && !*engine_->config().modifySurroundingText) {
+        FCITX_UNIKEY_DEBUG() << "[rebuildPreedit] Disabled by config";
+        return;
+    }
+
+    if (isFirefox()) {
+        FCITX_UNIKEY_DEBUG() << "[rebuildPreedit] Disabled for Firefox";
         return;
     }
 
@@ -443,6 +506,37 @@ void UnikeyState::rebuildPreedit(KeySym upcomingSym) {
 
     if (!uic_.isAtWordBeginning()) {
         FCITX_UNIKEY_DEBUG() << "[rebuildPreedit] Not at word beginning";
+        return;
+    }
+
+    if (!ic_->capabilityFlags().test(CapabilityFlag::SurroundingText)) {
+        FCITX_UNIKEY_DEBUG() << "[rebuildPreedit] SurroundingText capability not available";
+        return;
+    }
+
+    // Recovery probe: if we're currently in unreliable mode, do not attempt
+    // to rebuild/delete/modify state. Only probe the surrounding snapshot and
+    // count consecutive successes to recover.
+    if (surroundingTextUnreliable_) {
+        ic_->updateSurroundingText();
+        const size_t probeLen = probeWordLengthFromSurrounding(ic_->surroundingText());
+        if (probeLen > 0) {
+            surroundingSuccessCount_++;
+            surroundingFailureCount_ = 0;
+            FCITX_UNIKEY_DEBUG() << "[rebuildPreedit] Unreliable: probe success len="
+                                 << probeLen << " success=" << surroundingSuccessCount_
+                                 << "/" << kSurroundingRecoveryThreshold;
+            if (surroundingSuccessCount_ >= kSurroundingRecoveryThreshold) {
+                FCITX_UNIKEY_DEBUG()
+                    << "[rebuildPreedit] Recovery threshold reached; clearing unreliable flag";
+                surroundingTextUnreliable_ = false;
+                surroundingSuccessCount_ = 0;
+            }
+        } else {
+            // Break success streak if surrounding is still not usable.
+            surroundingSuccessCount_ = 0;
+            FCITX_UNIKEY_DEBUG() << "[rebuildPreedit] Unreliable: probe failed";
+        }
         return;
     }
 
@@ -485,6 +579,15 @@ void UnikeyState::rebuildPreedit(KeySym upcomingSym) {
             FCITX_UNIKEY_DEBUG()
                 << "[rebuildPreedit] Surrounding failure count: "
                 << surroundingFailureCount_ << "/" << kSurroundingFailureThreshold;
+
+            // Even if internal fallback succeeds, repeated stale surrounding
+            // snapshots still mean surrounding is unreliable for immediate
+            // commit (we cannot safely delete/replace around cursor).
+            if (surroundingFailureCount_ >= kSurroundingFailureThreshold) {
+                FCITX_UNIKEY_DEBUG()
+                    << "[rebuildPreedit] Failure threshold reached (stale surrounding); marking unreliable";
+                surroundingTextUnreliable_ = true;
+            }
             updatePreedit();
             return;
         }

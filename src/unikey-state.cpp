@@ -56,10 +56,16 @@ void UnikeyState::keyEvent(KeyEvent &keyEvent) {
                          << " Ctrl: " << keyEvent.rawKey().states().test(KeyState::Ctrl)
                          << " Alt: " << keyEvent.rawKey().states().test(KeyState::Alt);
 
+    // Snapshot whether immediate-commit is allowed for this keystroke BEFORE
+    // any surrounding-text rebuild attempts. rebuildPreedit() may mark
+    // surrounding text as unreliable, but we still want the current keystroke
+    // (that triggered the threshold) to behave consistently.
+    const bool allowImmediateCommitForThisKey = immediateCommitMode();
+
     if (keyEvent.key().isSimple()) {
         rebuildPreedit(keyEvent.rawKey().sym());
     }
-    preedit(keyEvent);
+    preedit(keyEvent, allowImmediateCommitForThisKey);
 
     // check last keyevent with shift
     if (keyEvent.rawKey().sym() >= FcitxKey_space &&
@@ -159,9 +165,16 @@ void UnikeyState::clearImmediateCommitHistory() {
     surroundingSuccessCount_ = 0;
 }
 
-void UnikeyState::preedit(KeyEvent &keyEvent) {
+void UnikeyState::preedit(KeyEvent &keyEvent, bool allowImmediateCommitForThisKey) {
     auto sym = keyEvent.rawKey().sym();
     auto state = keyEvent.rawKey().states();
+
+    // Treat keypad digits as their ASCII digit equivalents. This is important
+    // for VNI input method (tone/shape keys are digits) and also matches user
+    // expectations: KP_1 should behave like '1'.
+    if (sym >= FcitxKey_KP_0 && sym <= FcitxKey_KP_9) {
+        sym = static_cast<KeySym>(FcitxKey_0 + (sym - FcitxKey_KP_0));
+    }
 
     FCITX_UNIKEY_DEBUG() << "[preedit] Processing key " << sym
                          << " Current preedit: \"" << preeditStr_ << "\"";
@@ -284,8 +297,9 @@ void UnikeyState::preedit(KeyEvent &keyEvent) {
         uic_.setCapsState(state.test(KeyState::Shift),
                           state.test(KeyState::CapsLock));
 
-        const bool immediateCommit = immediateCommitMode();
-        FCITX_UNIKEY_DEBUG() << "[preedit] ImmediateCommit mode: " << immediateCommit;
+        const bool immediateCommit = allowImmediateCommitForThisKey;
+        FCITX_UNIKEY_DEBUG() << "[preedit] ImmediateCommit mode (snapshotted): "
+                     << immediateCommit;
 
         // process sym
 
