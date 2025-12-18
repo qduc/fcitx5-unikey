@@ -107,7 +107,8 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
         // ==========================================================
 
         // --- Test: Backspace handling in preedit mode ---
-        // Backspace should progressively undo Vietnamese transformations.
+        // Backspace should delete the whole character (standard behavior),
+        // not just remove the tone mark.
         if (shouldRunCase(selCopy, 1)) {
             announceCase(1);
             FCITX_INFO() << "testkeyhandling: Case 1 - Backspace handling in preedit mode";
@@ -124,14 +125,11 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("s"), false);
 
-            // Backspace should undo tone: "ấ" → "â"
+            // Backspace should delete the whole character: "ấ" → ""
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("BackSpace"), false);
 
-            // Backspace again should undo circumflex: "â" → "a"
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("BackSpace"), false);
-
-            // Commit what's left
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("a ");
+            // Commit what's left ("" -> space -> " ")
+            testfrontend->call<ITestFrontend::pushCommitExpectation>(" ");
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
         }
 
@@ -154,7 +152,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
         }
 
         // --- Test: Complex backspace undo sequence ---
-        // Test progressive undo of a more complex word.
+        // Test backspace deletes the last character.
         if (shouldRunCase(selCopy, 3)) {
             announceCase(3);
             FCITX_INFO() << "testkeyhandling: Case 3 - Complex backspace undo sequence";
@@ -173,11 +171,11 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("w"), false);
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("s"), false);
 
-            // Backspace to undo acute: "ướ" → "ươ"
+            // Backspace should delete the last character: "ướ" → "ư"
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("BackSpace"), false);
 
             // Commit
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("ươ ");
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("ư ");
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
         }
 
