@@ -27,9 +27,44 @@
 #include <fcitx/inputmethodmanager.h>
 #include <fcitx/instance.h>
 
+#include <iostream>
+
 using namespace fcitx;
 
 namespace {
+
+struct CaseSelection {
+    // 0 means run all cases.
+    int caseId = 0;
+    bool listCases = false;
+};
+
+bool shouldRunCase(const CaseSelection &sel, int id) {
+    return sel.caseId == 0 || sel.caseId == id;
+}
+
+void printCases() {
+    std::cout << "Available cases for testkeyhandling:\n";
+    std::cout << "  1: Backspace handling in preedit mode\n";
+    std::cout << "  2: Backspace at empty preedit\n";
+    std::cout << "  3: Complex backspace undo sequence\n";
+    std::cout << "  4: Backspace with selection in immediate commit mode\n";
+    std::cout << "  5: Shift+Shift keystroke restoration\n";
+    std::cout << "  6: Shift+Space keystroke restoration\n";
+    std::cout << "  7: Keypad digits for VNI - acute\n";
+    std::cout << "  8: Keypad digits for VNI - circumflex\n";
+    std::cout << "  9: Keypad digits for VNI - hook above\n";
+    std::cout << " 10: W at word beginning (process_w_at_begin=False)\n";
+    std::cout << " 11: W at word beginning (process_w_at_begin=True)\n";
+    std::cout << " 12: Multiple tone changes\n";
+    std::cout << " 13: Double-typing to undo tone\n";
+}
+
+void announceCase(int id) {
+    // Print unconditionally to make it easy for tooling (ctest wrappers) to
+    // detect the failing case even when fcitx logging sinks are not active.
+    std::cerr << "testkeyhandling: Case " << id << std::endl;
+}
 
 void setupInputMethodGroup(Instance *instance) {
     auto defaultGroup = instance->inputMethodManager().currentGroup();
@@ -40,8 +75,10 @@ void setupInputMethodGroup(Instance *instance) {
     instance->inputMethodManager().setGroup(defaultGroup);
 }
 
-void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
-    dispatcher->schedule([dispatcher, instance]() {
+void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
+                   const CaseSelection &sel) {
+    const auto selCopy = sel;
+    dispatcher->schedule([dispatcher, instance, selCopy]() {
         auto *unikey = instance->addonManager().addon("unikey", true);
         FCITX_ASSERT(unikey);
 
@@ -71,8 +108,9 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
 
         // --- Test: Backspace handling in preedit mode ---
         // Backspace should progressively undo Vietnamese transformations.
-        {
-            FCITX_INFO() << "testkeyhandling: Backspace handling in preedit mode";
+        if (shouldRunCase(selCopy, 1)) {
+            announceCase(1);
+            FCITX_INFO() << "testkeyhandling: Case 1 - Backspace handling in preedit mode";
             config.setValueByPath("ImmediateCommit", "False");
             config.setValueByPath("InputMethod", "Telex");
             unikey->setConfig(config);
@@ -99,8 +137,9 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
 
         // --- Test: Backspace at empty preedit ---
         // When preedit is empty, backspace should pass through to the application.
-        {
-            FCITX_INFO() << "testkeyhandling: Backspace at empty preedit";
+        if (shouldRunCase(selCopy, 2)) {
+            announceCase(2);
+            FCITX_INFO() << "testkeyhandling: Case 2 - Backspace at empty preedit";
             config.setValueByPath("ImmediateCommit", "False");
             config.setValueByPath("InputMethod", "Telex");
             unikey->setConfig(config);
@@ -116,8 +155,9 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
 
         // --- Test: Complex backspace undo sequence ---
         // Test progressive undo of a more complex word.
-        {
-            FCITX_INFO() << "testkeyhandling: Complex backspace undo sequence";
+        if (shouldRunCase(selCopy, 3)) {
+            announceCase(3);
+            FCITX_INFO() << "testkeyhandling: Case 3 - Complex backspace undo sequence";
             config.setValueByPath("ImmediateCommit", "False");
             config.setValueByPath("InputMethod", "Telex");
             unikey->setConfig(config);
@@ -143,8 +183,9 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
 
         // --- Test: Backspace in immediate commit mode with selection ---
         // When there's a selection, backspace should pass through in immediate mode.
-        {
-            FCITX_INFO() << "testkeyhandling: Backspace with selection in immediate commit mode";
+        if (shouldRunCase(selCopy, 4)) {
+            announceCase(4);
+            FCITX_INFO() << "testkeyhandling: Case 4 - Backspace with selection in immediate commit mode";
             config.setValueByPath("ImmediateCommit", "True");
             config.setValueByPath("InputMethod", "Telex");
             unikey->setConfig(config);
@@ -165,8 +206,9 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
 
         // --- Test: Shift+Shift keystroke restoration ---
         // Pressing Shift_L then Shift_R (or vice versa) should restore raw ASCII.
-        {
-            FCITX_INFO() << "testkeyhandling: Shift+Shift keystroke restoration";
+        if (shouldRunCase(selCopy, 5)) {
+            announceCase(5);
+            FCITX_INFO() << "testkeyhandling: Case 5 - Shift+Shift keystroke restoration";
             config.setValueByPath("ImmediateCommit", "False");
             config.setValueByPath("InputMethod", "Telex");
             unikey->setConfig(config);
@@ -194,8 +236,9 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
 
         // --- Test: Shift+Space keystroke restoration ---
         // Shift+Space should restore the original keystrokes (undo conversion).
-        {
-            FCITX_INFO() << "testkeyhandling: Shift+Space keystroke restoration";
+        if (shouldRunCase(selCopy, 6)) {
+            announceCase(6);
+            FCITX_INFO() << "testkeyhandling: Case 6 - Shift+Space keystroke restoration";
             config.setValueByPath("ImmediateCommit", "False");
             config.setValueByPath("InputMethod", "Telex");
             unikey->setConfig(config);
@@ -219,8 +262,9 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
 
         // --- Test: Keypad digits for VNI - acute tone ---
         // Keypad digits should work the same as regular digits for VNI input.
-        {
-            FCITX_INFO() << "testkeyhandling: Keypad digits for VNI - acute";
+        if (shouldRunCase(selCopy, 7)) {
+            announceCase(7);
+            FCITX_INFO() << "testkeyhandling: Case 7 - Keypad digits for VNI - acute";
             config.setValueByPath("ImmediateCommit", "False");
             config.setValueByPath("InputMethod", "VNI");
             unikey->setConfig(config);
@@ -239,8 +283,9 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
 
         // --- Test: Keypad digits for VNI - circumflex ---
         // VNI: KP_6 should add circumflex (like regular 6).
-        {
-            FCITX_INFO() << "testkeyhandling: Keypad digits for VNI - circumflex";
+        if (shouldRunCase(selCopy, 8)) {
+            announceCase(8);
+            FCITX_INFO() << "testkeyhandling: Case 8 - Keypad digits for VNI - circumflex";
             config.setValueByPath("ImmediateCommit", "False");
             config.setValueByPath("InputMethod", "VNI");
             unikey->setConfig(config);
@@ -259,8 +304,9 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
 
         // --- Test: Keypad digits for VNI - hook above ---
         // VNI: KP_3 should add hook above (hỏi tone).
-        {
-            FCITX_INFO() << "testkeyhandling: Keypad digits for VNI - hook above";
+        if (shouldRunCase(selCopy, 9)) {
+            announceCase(9);
+            FCITX_INFO() << "testkeyhandling: Case 9 - Keypad digits for VNI - hook above";
             config.setValueByPath("ImmediateCommit", "False");
             config.setValueByPath("InputMethod", "VNI");
             unikey->setConfig(config);
@@ -283,8 +329,9 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
 
         // --- Test: W at word beginning (process_w_at_begin=False) ---
         // When process_w_at_begin is False, 'w' at word start should pass through.
-        {
-            FCITX_INFO() << "testkeyhandling: W at word beginning (process_w_at_begin=False)";
+        if (shouldRunCase(selCopy, 10)) {
+            announceCase(10);
+            FCITX_INFO() << "testkeyhandling: Case 10 - W at word beginning (process_w_at_begin=False)";
             config.setValueByPath("ImmediateCommit", "False");
             config.setValueByPath("InputMethod", "Telex");
             config.setValueByPath("ProcessWAtBegin", "False");
@@ -310,8 +357,9 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
 
         // --- Test: W at word beginning (process_w_at_begin=True) ---
         // When process_w_at_begin is True, 'w' should be processed as horn.
-        {
-            FCITX_INFO() << "testkeyhandling: W at word beginning (process_w_at_begin=True)";
+        if (shouldRunCase(selCopy, 11)) {
+            announceCase(11);
+            FCITX_INFO() << "testkeyhandling: Case 11 - W at word beginning (process_w_at_begin=True)";
             config.setValueByPath("ImmediateCommit", "False");
             config.setValueByPath("InputMethod", "Telex");
             config.setValueByPath("ProcessWAtBegin", "True");
@@ -334,8 +382,9 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
 
         // --- Test: Multiple tone changes ---
         // Changing tones should work correctly.
-        {
-            FCITX_INFO() << "testkeyhandling: Multiple tone changes";
+        if (shouldRunCase(selCopy, 12)) {
+            announceCase(12);
+            FCITX_INFO() << "testkeyhandling: Case 12 - Multiple tone changes";
             config.setValueByPath("ImmediateCommit", "False");
             config.setValueByPath("InputMethod", "Telex");
             unikey->setConfig(config);
@@ -355,8 +404,9 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
 
         // --- Test: Double-typing to undo ---
         // Telex: typing "ss" should undo the acute tone.
-        {
-            FCITX_INFO() << "testkeyhandling: Double-typing to undo tone";
+        if (shouldRunCase(selCopy, 13)) {
+            announceCase(13);
+            FCITX_INFO() << "testkeyhandling: Case 13 - Double-typing to undo tone";
             config.setValueByPath("ImmediateCommit", "False");
             config.setValueByPath("InputMethod", "Telex");
             unikey->setConfig(config);
@@ -384,23 +434,41 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
 
 } // namespace
 
-int main() {
+int main(int argc, char **argv) {
+    CaseSelection sel;
+    for (int i = 1; i < argc; i++) {
+        std::string_view arg(argv[i]);
+        if (arg == "--list-cases") {
+            sel.listCases = true;
+        } else if (arg == "--case" && i + 1 < argc) {
+            sel.caseId = std::max(0, std::atoi(argv[i + 1]));
+            i++;
+        } else if (arg.rfind("--case=", 0) == 0) {
+            sel.caseId = std::max(0, std::atoi(std::string(arg.substr(7)).c_str()));
+        }
+    }
+
     setupTestingEnvironmentPath(TESTING_BINARY_DIR, {"bin"},
                                 {TESTING_BINARY_DIR "/test"});
 
     char arg0[] = "testkeyhandling";
     char arg1[] = "--disable=all";
     char arg2[] = "--enable=testim,testfrontend,unikey";
-    char *argv[] = {arg0, arg1, arg2};
+    char *fcitxArgv[] = {arg0, arg1, arg2};
 
     fcitx::Log::setLogRule("default=3,unikey=3");
 
-    Instance instance(FCITX_ARRAY_SIZE(argv), argv);
+    if (sel.listCases) {
+        printCases();
+        return 0;
+    }
+
+    Instance instance(FCITX_ARRAY_SIZE(fcitxArgv), fcitxArgv);
     instance.addonManager().registerDefaultLoader(nullptr);
 
     EventDispatcher dispatcher;
     dispatcher.attach(&instance.eventLoop());
-    scheduleEvent(&dispatcher, &instance);
+    scheduleEvent(&dispatcher, &instance, sel);
     instance.exec();
 
     return 0;

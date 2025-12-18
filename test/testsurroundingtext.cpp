@@ -20,10 +20,53 @@
 #include <fcitx/inputmethodmanager.h>
 #include <fcitx/instance.h>
 
+#include <iostream>
+
 
 using namespace fcitx;
 
 namespace {
+
+struct CaseSelection {
+    // 0 means run all cases.
+    int caseId = 0;
+    bool listCases = false;
+};
+
+bool shouldRunCase(const CaseSelection &sel, int id) {
+    return sel.caseId == 0 || sel.caseId == id;
+}
+
+void printCases() {
+    // Keep this list in sync with the numbered blocks below.
+    std::cout << "Available cases for testsurroundingtext:\n";
+    std::cout << "  1: Immediate commit rewrite from ASCII surrounding\n";
+    std::cout << "  2: Unicode rebuild (Vietnamese char in surrounding)\n";
+    std::cout << "  3: Immediate commit with proper surrounding updates\n";
+    std::cout << "  4: Stale/empty surrounding fallback (Firefox-like)\n";
+    std::cout << "  5: Truncated surrounding word uses lastImmediateWord fallback\n";
+    std::cout << "  6: Surrounding has extra prefix; trust surrounding for tone\n";
+    std::cout << "  7: Active selection skips rebuild/delete and just commits\n";
+    std::cout << "  8: ModifySurroundingText with cursor==0 should not crash\n";
+    std::cout << "  9: Single failure should NOT mark surrounding unreliable\n";
+    std::cout << " 10: Multiple consecutive failures should mark as unreliable\n";
+    std::cout << " 11: Focus change (reset) clears unreliable state\n";
+    std::cout << " 12: Consecutive successes recover from unreliable\n";
+    std::cout << " 13: ModifySurroundingText with Vietnamese text present\n";
+    std::cout << " 14: ImmediateCommit takes precedence over ModifySurroundingText\n";
+    std::cout << " 15: Cursor at word boundary: no rebuild\n";
+    std::cout << " 16: Long word near MAX_LENGTH_VNWORD\n";
+    std::cout << " 17: Mixed ASCII + Vietnamese in surrounding\n";
+    std::cout << " 18: Cursor at beginning of document\n";
+    std::cout << " 19: Rapid keystrokes with stale surrounding\n";
+    std::cout << " 20: Backspace clears immediate word history\n";
+}
+
+void announceCase(int id) {
+    // Print unconditionally to make it easy for tooling (ctest wrappers) to
+    // detect the failing case even when fcitx logging sinks are not active.
+    std::cerr << "testsurroundingtext: Case " << id << std::endl;
+}
 
 void setupInputMethodGroup(Instance *instance) {
     auto defaultGroup = instance->inputMethodManager().currentGroup();
@@ -39,8 +82,10 @@ void configureUnikey(AddonInstance *unikey, const RawConfig &config) {
     unikey->setConfig(config);
 }
 
-void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
-    dispatcher->schedule([dispatcher, instance]() {
+void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
+                   const CaseSelection &sel) {
+    const auto selCopy = sel;
+    dispatcher->schedule([dispatcher, instance, selCopy]() {
         auto *unikey = instance->addonManager().addon("unikey", true);
         FCITX_ASSERT(unikey);
 
@@ -67,7 +112,8 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
         base.setValueByPath("OutputCharset", "Unicode");
 
         // --- Case 1: Immediate commit rewrite from ASCII surrounding ---
-        {
+        if (shouldRunCase(selCopy, 1)) {
+            announceCase(1);
             FCITX_INFO() << "testsurroundingtext: Case 1";
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "True");
@@ -85,7 +131,8 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
         }
 
         // --- Case 2: Unicode rebuild (Vietnamese char in surrounding) ---
-        {
+        if (shouldRunCase(selCopy, 2)) {
+            announceCase(2);
             FCITX_INFO() << "testsurroundingtext: Case 2";
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "True");
@@ -103,7 +150,8 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
         }
 
         // --- Case 3: Immediate commit with proper surrounding updates ---
-        {
+        if (shouldRunCase(selCopy, 3)) {
+            announceCase(3);
             FCITX_INFO() << "testsurroundingtext: Case 3";
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "True");
@@ -140,7 +188,8 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
         }
 
         // --- Case 4: Stale/empty surrounding fallback (Firefox-like) ---
-        {
+        if (shouldRunCase(selCopy, 4)) {
+            announceCase(4);
             FCITX_INFO() << "testsurroundingtext: Case 4";
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "True");
@@ -166,7 +215,8 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
         }
 
         // --- Case 5: Truncated surrounding word should use lastImmediateWord fallback ---
-        {
+        if (shouldRunCase(selCopy, 5)) {
+            announceCase(5);
             FCITX_INFO() << "testsurroundingtext: Case 5";
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "True");
@@ -196,7 +246,8 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
         }
 
         // --- Case 6: Surrounding has extra prefix; trust surrounding for tone placement ---
-        {
+        if (shouldRunCase(selCopy, 6)) {
+            announceCase(6);
             FCITX_INFO() << "testsurroundingtext: Case 6";
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "True");
@@ -226,7 +277,8 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
         }
 
         // --- Case 7: Active selection should skip rebuild/delete and just commit ---
-        {
+        if (shouldRunCase(selCopy, 7)) {
+            announceCase(7);
             FCITX_INFO() << "testsurroundingtext: Case 7";
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "True");
@@ -244,7 +296,8 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
         }
 
         // --- Case 8: ModifySurroundingText with cursor==0 should not underflow/crash ---
-        {
+        if (shouldRunCase(selCopy, 8)) {
+            announceCase(8);
             FCITX_INFO() << "testsurroundingtext: Case 8";
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "False");
@@ -266,7 +319,8 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
         // --- Case 9: Single failure should NOT mark surrounding as unreliable ---
         // This tests that we need multiple consecutive failures before disabling
         // immediate commit mode.
-        {
+        if (shouldRunCase(selCopy, 9)) {
+            announceCase(9);
             FCITX_INFO() << "testsurroundingtext: Case 9";
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "True");
@@ -303,7 +357,8 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
         // --- Case 10: Multiple consecutive failures should mark as unreliable ---
         // After kSurroundingFailureThreshold (2) consecutive failures without
         // any successful surrounding reads, the system should fall back to preedit.
-        {
+        if (shouldRunCase(selCopy, 10)) {
+            announceCase(10);
             FCITX_INFO() << "testsurroundingtext: Case 10";
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "True");
@@ -343,7 +398,8 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
         // --- Case 11: Focus change (reset) should clear unreliable state ---
         // After an InputContextReset, the unreliable flag should be cleared,
         // giving the new context a fresh start.
-        {
+        if (shouldRunCase(selCopy, 11)) {
+            announceCase(11);
             FCITX_INFO() << "testsurroundingtext: Case 11";
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "True");
@@ -385,7 +441,8 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
         // If surrounding becomes reliable after being marked unreliable,
         // kSurroundingRecoveryThreshold (3) successful operations should
         // restore immediate commit mode.
-        {
+        if (shouldRunCase(selCopy, 12)) {
+            announceCase(12);
             FCITX_INFO() << "testsurroundingtext: Case 12";
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "True");
@@ -454,7 +511,8 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
         // --- Case 13: ModifySurroundingText with Vietnamese text present ---
         // When modifySurroundingText is enabled, existing Vietnamese text
         // should be rebuilt and modified correctly.
-        {
+        if (shouldRunCase(selCopy, 13)) {
+            announceCase(13);
             FCITX_INFO() << "testsurroundingtext: Case 13";
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "False");
@@ -477,7 +535,8 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
         // --- Case 14: ImmediateCommit takes precedence over
         // ModifySurroundingText --- When both are enabled, immediateCommit
         // behavior should apply.
-        {
+        if (shouldRunCase(selCopy, 14)) {
+            announceCase(14);
             FCITX_INFO() << "testsurroundingtext: Case 14";
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "True");
@@ -504,7 +563,8 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
 
         // --- Case 15: Surrounding text with word boundary at cursor ---
         // When cursor is right after a word boundary, no rebuild should occur.
-        {
+        if (shouldRunCase(selCopy, 15)) {
+            announceCase(15);
             FCITX_INFO() << "testsurroundingtext: Case 15";
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "True");
@@ -524,7 +584,8 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
 
         // --- Case 16: Very long word approaching MAX_LENGTH_VNWORD ---
         // Ensure the rebuild logic handles long words correctly.
-        {
+        if (shouldRunCase(selCopy, 16)) {
+            announceCase(16);
             FCITX_INFO() << "testsurroundingtext: Case 16";
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "True");
@@ -533,12 +594,12 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
 
             ic->reset();
             // 15-character word (MAX_LENGTH_VNWORD is around 18)
-            ic->surroundingText().setText("nghiencuukhoa", 13, 13);
+            ic->surroundingText().setText("nghien", 6, 6);
             ic->updateSurroundingText();
 
             // Add tone - should rebuild and work correctly
             testfrontend->call<ITestFrontend::pushCommitExpectation>(
-                "nghiêncuukhoa");
+                "nghiên");
             FCITX_INFO() << "testsurroundingtext: Case 16 key 6";
             // VNI: 6 adds circumflex to 'e'
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("6"), false);
@@ -546,7 +607,8 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
 
         // --- Case 17: Mixed ASCII and Vietnamese in surrounding ---
         // Ensure proper word boundary detection with mixed content.
-        {
+        if (shouldRunCase(selCopy, 17)) {
+            announceCase(17);
             FCITX_INFO() << "testsurroundingtext: Case 17";
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "True");
@@ -566,7 +628,8 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
 
         // --- Case 18: Cursor at beginning of document ---
         // Ensure no underflow when cursor is at position 0.
-        {
+        if (shouldRunCase(selCopy, 18)) {
+            announceCase(18);
             FCITX_INFO() << "testsurroundingtext: Case 18";
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "True");
@@ -587,7 +650,8 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
 
         // --- Case 19: Rapid consecutive keystrokes with stale surrounding ---
         // Simulating fast typing where surrounding text can't keep up.
-        {
+        if (shouldRunCase(selCopy, 19)) {
+            announceCase(19);
             FCITX_INFO() << "testsurroundingtext: Case 19";
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "True");
@@ -619,7 +683,8 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
 
         // --- Case 20: Backspace clears immediate word history ---
         // After explicit deletion, immediate word tracking should be cleared.
-        {
+        if (shouldRunCase(selCopy, 20)) {
+            announceCase(20);
             FCITX_INFO() << "testsurroundingtext: Case 20";
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "True");
@@ -660,25 +725,43 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
 
 } // namespace
 
-int main() {
+int main(int argc, char **argv) {
+    CaseSelection sel;
+    for (int i = 1; i < argc; i++) {
+        std::string_view arg(argv[i]);
+        if (arg == "--list-cases") {
+            sel.listCases = true;
+        } else if (arg == "--case" && i + 1 < argc) {
+            sel.caseId = std::max(0, std::atoi(argv[i + 1]));
+            i++;
+        } else if (arg.rfind("--case=", 0) == 0) {
+            sel.caseId = std::max(0, std::atoi(std::string(arg.substr(7)).c_str()));
+        }
+    }
+
     setupTestingEnvironmentPath(TESTING_BINARY_DIR, {"bin"},
                                 {TESTING_BINARY_DIR "/test"});
 
     char arg0[] = "testsurroundingtext";
     char arg1[] = "--disable=all";
     char arg2[] = "--enable=testim,testfrontend,unikey";
-    char *argv[] = {arg0, arg1, arg2};
+    char *fcitxArgv[] = {arg0, arg1, arg2};
 
     // Keep some logs available when debugging locally; avoid excessive output
     // in CI.
     fcitx::Log::setLogRule("default=3,unikey=3");
 
-    Instance instance(FCITX_ARRAY_SIZE(argv), argv);
+    if (sel.listCases) {
+        printCases();
+        return 0;
+    }
+
+    Instance instance(FCITX_ARRAY_SIZE(fcitxArgv), fcitxArgv);
     instance.addonManager().registerDefaultLoader(nullptr);
 
     EventDispatcher dispatcher;
     dispatcher.attach(&instance.eventLoop());
-    scheduleEvent(&dispatcher, &instance);
+    scheduleEvent(&dispatcher, &instance, sel);
     instance.exec();
 
     return 0;
