@@ -1,1 +1,1 @@
-Refer @AGENTS.md
+Refer @./AGENTS.md

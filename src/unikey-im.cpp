@@ -214,6 +214,9 @@ void UnikeyEngine::reset(const InputMethodEntry & /*entry*/,
     auto *state = event.inputContext()->propertyFor(&factory_);
     state->reset();
     if (event.type() == EventType::InputContextReset) {
+        // Reset should also clear any immediate-commit rewrite history: the
+        // surrounding context may have changed (focus change, app reset, etc.).
+        state->clearImmediateCommitHistory();
         if (event.inputContext()->capabilityFlags().test(
                 CapabilityFlag::SurroundingText)) {
             state->mayRebuildStateFromSurroundingText_ = true;

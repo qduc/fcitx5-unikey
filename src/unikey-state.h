@@ -24,6 +24,7 @@ public:
     ~UnikeyState() = default;
 
     void keyEvent(KeyEvent &keyEvent);
+    void clearImmediateCommitHistory();
     void preedit(KeyEvent &keyEvent);
     void handleIgnoredKey();
     void commit();
@@ -31,14 +32,28 @@ public:
     void updatePreedit();
 
     bool immediateCommitMode() const;
+    bool isFirefox() const;
     void eraseChars(int num_chars);
     void reset();
 
     void rebuildFromSurroundingText();
     size_t rebuildStateFromSurrounding(bool deleteSurrounding);
-    void rebuildPreedit();
+    size_t rebuildStateFromLastImmediateWord(bool deleteSurrounding, KeySym upcomingSym);
+    void rebuildPreedit(KeySym upcomingSym);
 
     bool mayRebuildStateFromSurroundingText_ = false;
+
+    // Transient flag set by rebuildStateFromSurrounding(): true if the rebuild
+    // failed because surrounding text appears stale/truncated compared to the
+    // last immediate-commit word. Used to decide whether it's appropriate to
+    // use the lastImmediateWord_ fallback.
+    bool lastSurroundingRebuildWasStale_ = false;
+
+    // If surrounding text from the application is unreliable (e.g. Firefox
+    // temporarily returns stale/empty surrounding text after a commit), we
+    // should stop using immediate-commit mode and fall back to regular
+    // composition (preedit) to avoid corrupting text.
+    bool surroundingTextUnreliable_ = false;
 
 private:
     UnikeyEngine *engine_;
@@ -48,6 +63,13 @@ private:
     std::string preeditStr_;
     bool autoCommit_ = false;
     KeySym lastShiftPressed_ = FcitxKey_None;
+
+    // Last committed word in immediate-commit mode (UTF-8) and its character
+    // count (Unicode code points). Used as a safe fallback when surrounding
+    // text is temporarily stale/empty.
+    std::string lastImmediateWord_;
+    size_t lastImmediateWordCharCount_ = 0;
+    bool recordNextCommitAsImmediateWord_ = false;
 };
 
 } // namespace fcitx

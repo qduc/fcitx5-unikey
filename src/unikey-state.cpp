@@ -57,7 +57,7 @@ void UnikeyState::keyEvent(KeyEvent &keyEvent) {
                          << " Alt: " << keyEvent.rawKey().states().test(KeyState::Alt);
 
     if (keyEvent.key().isSimple()) {
-        rebuildPreedit();
+        rebuildPreedit(keyEvent.rawKey().sym());
     }
     preedit(keyEvent);
 
@@ -71,9 +71,26 @@ void UnikeyState::keyEvent(KeyEvent &keyEvent) {
     } // end check last keyevent with shift
 }
 
+bool UnikeyState::isFirefox() const {
+    return ic_->program() == "firefox" || ic_->program() == "org.mozilla.firefox" ||
+           ic_->program() == "firefox-bin" || ic_->program() == "Firefox";
+}
+
 bool UnikeyState::immediateCommitMode() const {
     if (!*this->engine_->config().immediateCommit) {
         FCITX_UNIKEY_DEBUG() << "[immediateCommitMode] Disabled in config";
+        return false;
+    }
+
+    if (isFirefox()) {
+        FCITX_UNIKEY_DEBUG() << "[immediateCommitMode] Disabled for Firefox";
+        return false;
+    }
+
+    if (surroundingTextUnreliable_) {
+        FCITX_UNIKEY_DEBUG()
+            << "[immediateCommitMode] Surrounding text marked unreliable; "
+               "falling back to preedit";
         return false;
     }
     // This mode relies on reading and modifying surrounding text.
@@ -118,6 +135,20 @@ void UnikeyState::reset() {
     preeditStr_.clear();
     updatePreedit();
     lastShiftPressed_ = FcitxKey_None;
+
+    // Do not clear surroundingTextUnreliable_ here: reset() may be triggered by
+    // applications frequently. Keeping this sticky avoids flapping between
+    // modes in apps that provide inconsistent surrounding text.
+}
+
+void UnikeyState::clearImmediateCommitHistory() {
+    // Clear history used only for immediate-commit surrounding rewrite.
+    // This is intended for InputContextReset / focus changes where the
+    // surrounding context is no longer related to the last committed word.
+    lastImmediateWord_.clear();
+    lastImmediateWordCharCount_ = 0;
+    recordNextCommitAsImmediateWord_ = false;
+    lastSurroundingRebuildWasStale_ = false;
 }
 
 void UnikeyState::preedit(KeyEvent &keyEvent) {
@@ -181,6 +212,12 @@ void UnikeyState::preedit(KeyEvent &keyEvent) {
             // Immediate-commit mode: just delete one character and reset state.
             FCITX_UNIKEY_DEBUG() << "[preedit] Deleting surrounding text (-1, 1)";
             ic_->deleteSurroundingText(-1, 1);
+
+            // After explicit deletion, we should not attempt to rewrite using
+            // the last immediate word.
+            lastImmediateWord_.clear();
+            lastImmediateWordCharCount_ = 0;
+
             reset();
             keyEvent.filterAndAccept();
             return;
@@ -244,18 +281,11 @@ void UnikeyState::preedit(KeyEvent &keyEvent) {
 
         // process sym
 
-        // auto commit word that never need to change later in preedit string
-        // (like consonant - phu am) if macro enabled, then not auto commit.
-        // Because macro may change any word
-        if (!immediateCommit && !*this->engine_->config().macro &&
-            (uic_.isAtWordBeginning() || autoCommit_)) {
-            if (isWordAutoCommit(sym)) {
-                FCITX_UNIKEY_DEBUG() << "[preedit] Auto-committing word-beginning character";
-                uic_.putChar(sym);
-                autoCommit_ = true;
-                return;
-            }
-        } // end auto commit
+        // process sym
+
+        // auto commit block removed to fix https://github.com/fcitx/fcitx5-unikey/issues/chep1
+        // (prevents premature commit of initial consonants which breaks tone placement)
+
 
         if ((*this->engine_->config().im == UkTelex ||
              *this->engine_->config().im == UkSimpleTelex2) &&
@@ -299,6 +329,10 @@ void UnikeyState::preedit(KeyEvent &keyEvent) {
 
         if (immediateCommit) {
             FCITX_UNIKEY_DEBUG() << "[preedit] ImmediateCommit: committing \"" << preeditStr_ << "\"";
+            // Record this commit as the latest immediate-commit word if it
+            // looks like a word (no spaces / breaks). This will be used as a
+            // fallback rewrite source when surrounding text is stale/empty.
+            recordNextCommitAsImmediateWord_ = true;
             commit();
             keyEvent.filterAndAccept();
             return;
@@ -329,10 +363,46 @@ void UnikeyState::handleIgnoredKey() {
     FCITX_UNIKEY_DEBUG() << "[handleIgnoredKey] Processing ignored key";
     uic_.filter(0);
     syncState();
+
+    // This is not an immediate-commit keystroke. Avoid using it as a rewrite
+    // source.
+    recordNextCommitAsImmediateWord_ = false;
     commit();
 }
 
 void UnikeyState::commit() {
+    if (recordNextCommitAsImmediateWord_) {
+        recordNextCommitAsImmediateWord_ = false;
+        // Only keep a safe "word" as rewrite source.
+        // - Must be valid UTF-8
+        // - Must not contain word-break symbols (ASCII)
+        auto charLen = utf8::lengthValidated(preeditStr_);
+        bool ok = (charLen != utf8::INVALID_LENGTH);
+        if (ok && !preeditStr_.empty()) {
+            for (const auto &c : preeditStr_) {
+                // Non-ASCII bytes are allowed (Vietnamese letters).
+                if (static_cast<unsigned char>(c) < 0x80) {
+                    if (isWordBreakSym(static_cast<unsigned char>(c))) {
+                        ok = false;
+                        break;
+                    }
+                }
+            }
+        }
+        if (ok && !preeditStr_.empty()) {
+            lastImmediateWord_ = preeditStr_;
+            lastImmediateWordCharCount_ = static_cast<size_t>(charLen);
+            FCITX_UNIKEY_DEBUG()
+                << "[commit] Recorded last immediate word: \"" << lastImmediateWord_
+                << "\" chars=" << lastImmediateWordCharCount_;
+        } else {
+            lastImmediateWord_.clear();
+            lastImmediateWordCharCount_ = 0;
+            FCITX_UNIKEY_DEBUG()
+                << "[commit] Not recording immediate word (not a safe word)";
+        }
+    }
+
     if (!preeditStr_.empty()) {
         FCITX_UNIKEY_DEBUG() << "[commit] Committing string: \"" << preeditStr_ << "\"";
         ic_->commitString(preeditStr_);

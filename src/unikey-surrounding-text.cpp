@@ -24,6 +24,58 @@
 
 namespace fcitx {
 
+namespace {
+
+struct RebuildItem {
+    bool isAscii;
+    unsigned char ascii;
+    VnLexiName vn;
+};
+
+static bool isRebuildableAscii(unsigned char c) { return !isWordBreakSym(c); }
+
+static bool isRebuildableUnicode(uint32_t unicode, RebuildItem &out) {
+    if (unicode < 0x80) {
+        auto c = static_cast<unsigned char>(unicode);
+        if (isRebuildableAscii(c)) {
+            out.isAscii = true;
+            out.ascii = c;
+            out.vn = vnl_nonVnChar;
+            return true;
+        }
+        return false;
+    }
+    auto ch = charToVnLexi(unicode);
+    if (ch != vnl_nonVnChar) {
+        out.isAscii = false;
+        out.ascii = 0;
+        out.vn = ch;
+        return true;
+    }
+    return false;
+}
+
+static void replayItemsToEngine(UnikeyInputContext &uic,
+                                const std::vector<RebuildItem> &items,
+                                UnikeyState *state) {
+    size_t itemCount = 0;
+    for (const auto &item : items) {
+        if (item.isAscii) {
+            FCITX_UNIKEY_DEBUG() << "[rebuild] Replaying ASCII: " << item.ascii;
+            uic.filter(item.ascii);
+            state->syncState(static_cast<KeySym>(item.ascii));
+        } else {
+            FCITX_UNIKEY_DEBUG() << "[rebuild] Replaying Vietnamese char";
+            uic.rebuildChar(item.vn);
+            state->syncState();
+        }
+        itemCount++;
+    }
+    FCITX_UNIKEY_DEBUG() << "[rebuild] Replayed " << itemCount << " items";
+}
+
+} // namespace
+
 void UnikeyState::rebuildFromSurroundingText() {
     FCITX_UNIKEY_DEBUG() << "[rebuildFromSurroundingText] Called, flag=" << mayRebuildStateFromSurroundingText_;
 
@@ -138,6 +190,9 @@ void UnikeyState::rebuildFromSurroundingText() {
 size_t UnikeyState::rebuildStateFromSurrounding(bool deleteSurrounding) {
     FCITX_UNIKEY_DEBUG() << "[rebuildStateFromSurrounding] Called with deleteSurrounding=" << deleteSurrounding;
 
+    // Reset transient stale marker for this attempt.
+    lastSurroundingRebuildWasStale_ = false;
+
     // Ask the frontend to refresh surrounding text so we can see what was
     // just committed.
     ic_->updateSurroundingText();
@@ -166,6 +221,18 @@ size_t UnikeyState::rebuildStateFromSurrounding(bool deleteSurrounding) {
     FCITX_UNIKEY_DEBUG() << "[rebuildStateFromSurrounding] Text: \"" << text
                          << "\" cursor: " << cursor << " length: " << length;
 
+    // If we have a recent immediate-commit word but the app reports completely
+    // empty surrounding text, it is very likely a stale snapshot (observed in
+    // some browsers). Mark as stale so rebuildPreedit() can try the
+    // lastImmediateWord_ fallback.
+    if (deleteSurrounding && !lastImmediateWord_.empty() && text.empty()) {
+        FCITX_UNIKEY_DEBUG()
+            << "[rebuildStateFromSurrounding] Surrounding text empty while lastImmediateWord=\""
+            << lastImmediateWord_ << "\", treating as stale";
+        lastSurroundingRebuildWasStale_ = true;
+        return 0;
+    }
+
     if (length == utf8::INVALID_LENGTH) {
         FCITX_UNIKEY_DEBUG() << "[rebuildStateFromSurrounding] Invalid UTF8 length";
         return 0;
@@ -179,12 +246,6 @@ size_t UnikeyState::rebuildStateFromSurrounding(bool deleteSurrounding) {
     // - ASCII characters are treated as part of the word as long as they're
     //   not a word-break symbol.
     // - Non-ASCII characters must be Vietnamese letters understood by vnlexi.
-    struct RebuildItem {
-        bool isAscii;
-        unsigned char ascii;
-        VnLexiName vn;
-    };
-
     std::vector<RebuildItem> items;
     items.reserve(MAX_LENGTH_VNWORD + 1);
 
@@ -205,25 +266,8 @@ size_t UnikeyState::rebuildStateFromSurrounding(bool deleteSurrounding) {
             return 0;
         }
 
-        bool ok = false;
         RebuildItem item;
-        if (unicode < 0x80) {
-            auto c = static_cast<unsigned char>(unicode);
-            if (!isWordBreakSym(c)) {
-                ok = true;
-                item.isAscii = true;
-                item.ascii = c;
-                item.vn = vnl_nonVnChar;
-            }
-        } else {
-            auto ch = charToVnLexi(unicode);
-            if (ch != vnl_nonVnChar) {
-                ok = true;
-                item.isAscii = false;
-                item.ascii = 0;
-                item.vn = ch;
-            }
-        }
+        bool ok = isRebuildableUnicode(unicode, item);
 
         if (!ok) {
             items.clear();
@@ -242,6 +286,65 @@ size_t UnikeyState::rebuildStateFromSurrounding(bool deleteSurrounding) {
         return 0;
     }
 
+    // Safety: if we have a last immediate-commit word, but the app's surrounding
+    // text doesn't match it, the surrounding text is likely stale (e.g. Firefox
+    // after commit). In that case, do NOT delete/rebuild from surrounding.
+    // We'll try a safer fallback path in rebuildPreedit().
+    if (deleteSurrounding && !lastImmediateWord_.empty()) {
+        const std::string wordUtf8(&*segmentStart, std::distance(segmentStart, end));
+        if (wordUtf8.empty()) {
+            FCITX_UNIKEY_DEBUG()
+                << "[rebuildStateFromSurrounding] Surrounding word empty while lastImmediateWord=\""
+                << lastImmediateWord_ << "\", treating as stale";
+            lastSurroundingRebuildWasStale_ = true;
+            return 0;
+        }
+
+        if (wordUtf8 != lastImmediateWord_) {
+            // Detect stale surrounding snapshots that are likely *truncated*
+            // versions of the last committed word (common in Firefox timing
+            // issues). In that case, rebuilding/deleting based on surrounding
+            // may delete too little and corrupt text.
+            const bool lastStartsWithSurrounding =
+                lastImmediateWord_.size() > wordUtf8.size() &&
+                lastImmediateWord_.compare(0, wordUtf8.size(), wordUtf8) == 0;
+            const bool lastEndsWithSurrounding =
+                lastImmediateWord_.size() > wordUtf8.size() &&
+                lastImmediateWord_.compare(lastImmediateWord_.size() - wordUtf8.size(),
+                                           wordUtf8.size(), wordUtf8) == 0;
+
+            if (lastStartsWithSurrounding || lastEndsWithSurrounding) {
+                FCITX_UNIKEY_DEBUG()
+                    << "[rebuildStateFromSurrounding] Surrounding word looks truncated (got=\""
+                    << wordUtf8 << "\", last=\"" << lastImmediateWord_
+                    << "\"), treating as stale";
+                lastSurroundingRebuildWasStale_ = true;
+                return 0;
+            }
+
+            // If surrounding is longer but ends with lastImmediateWord_, trust
+            // surrounding (it has more context, important for tone placement).
+            const bool surroundingEndsWithLast =
+                wordUtf8.size() > lastImmediateWord_.size() &&
+                wordUtf8.compare(wordUtf8.size() - lastImmediateWord_.size(),
+                                 lastImmediateWord_.size(),
+                                 lastImmediateWord_) == 0;
+            if (surroundingEndsWithLast) {
+                FCITX_UNIKEY_DEBUG()
+                    << "[rebuildStateFromSurrounding] Surrounding word has extra prefix (got=\""
+                    << wordUtf8 << "\", last=\"" << lastImmediateWord_
+                    << "\"), accepting surrounding";
+            } else {
+                // Otherwise, assume the user moved the cursor / changed context
+                // and the surrounding word is authoritative.
+                FCITX_UNIKEY_DEBUG()
+                    << "[rebuildStateFromSurrounding] Surrounding word differs from lastImmediateWord (got=\""
+                    << wordUtf8 << "\", last=\"" << lastImmediateWord_
+                    << "\"), accepting surrounding";
+            }
+        }
+    }
+
     // Reset local composing buffer and engine state before rebuilding.
     FCITX_UNIKEY_DEBUG() << "[rebuildStateFromSurrounding] Resetting engine and preedit, rebuilding word";
     uic_.resetBuf();
@@ -250,22 +353,7 @@ size_t UnikeyState::rebuildStateFromSurrounding(bool deleteSurrounding) {
     // Rebuild ukengine state and our composing string by replaying the
     // current word. For ASCII characters we need filtering, otherwise the
     // engine won't recognize sequences like "aa" -> "â".
-    size_t itemCount = 0;
-    for (const auto &item : items) {
-        if (item.isAscii) {
-            FCITX_UNIKEY_DEBUG() << "[rebuildStateFromSurrounding] Replaying ASCII: " << item.ascii;
-            uic_.filter(item.ascii);
-            syncState(static_cast<KeySym>(item.ascii));
-        } else {
-            FCITX_UNIKEY_DEBUG() << "[rebuildStateFromSurrounding] Replaying Vietnamese char";
-            uic_.rebuildChar(item.vn);
-            syncState();
-        }
-        itemCount++;
-    }
-
-    FCITX_UNIKEY_DEBUG() << "[rebuildStateFromSurrounding] Rebuilt preedit: \"" << preeditStr_
-                         << "\" from " << itemCount << " items";
+    replayItemsToEngine(uic_, items, this);
 
     if (deleteSurrounding) {
         FCITX_UNIKEY_DEBUG() << "[rebuildStateFromSurrounding] Deleting surrounding text: -"
@@ -276,8 +364,68 @@ size_t UnikeyState::rebuildStateFromSurrounding(bool deleteSurrounding) {
     return wordLength;
 }
 
-void UnikeyState::rebuildPreedit() {
-    FCITX_UNIKEY_DEBUG() << "[rebuildPreedit] Called";
+size_t UnikeyState::rebuildStateFromLastImmediateWord(bool deleteSurrounding, KeySym upcomingSym) {
+    FCITX_UNIKEY_DEBUG()
+        << "[rebuildStateFromLastImmediateWord] Called deleteSurrounding="
+        << deleteSurrounding << " upcomingSym=" << upcomingSym;
+
+    if (lastImmediateWord_.empty() || lastImmediateWordCharCount_ == 0 ||
+        lastImmediateWordCharCount_ > MAX_LENGTH_VNWORD) {
+        FCITX_UNIKEY_DEBUG()
+            << "[rebuildStateFromLastImmediateWord] No lastImmediateWord";
+        return 0;
+    }
+
+    // Parse the last immediate word into rebuild items.
+    std::vector<RebuildItem> items;
+    items.reserve(lastImmediateWordCharCount_ + 1);
+
+    auto it = lastImmediateWord_.begin();
+    auto end = lastImmediateWord_.end();
+    while (it != end) {
+        uint32_t unicode = 0;
+        auto next = utf8::getNextChar(it, end, &unicode);
+        if (unicode == utf8::INVALID_CHAR || unicode == utf8::NOT_ENOUGH_SPACE) {
+            FCITX_UNIKEY_DEBUG()
+                << "[rebuildStateFromLastImmediateWord] Invalid UTF-8";
+            return 0;
+        }
+        RebuildItem item;
+        if (!isRebuildableUnicode(unicode, item)) {
+            FCITX_UNIKEY_DEBUG()
+                << "[rebuildStateFromLastImmediateWord] Word contains non-rebuildable char";
+            return 0;
+        }
+        items.push_back(item);
+        it = next;
+    }
+
+    if (items.empty()) {
+        return 0;
+    }
+
+    FCITX_UNIKEY_DEBUG() << "[rebuildStateFromLastImmediateWord] Rebuilding from \""
+                         << lastImmediateWord_ << "\" items=" << items.size();
+
+    // Reset local composing buffer and engine state before rebuilding.
+    uic_.resetBuf();
+    preeditStr_.clear();
+
+    replayItemsToEngine(uic_, items, this);
+
+    if (deleteSurrounding) {
+        FCITX_UNIKEY_DEBUG()
+            << "[rebuildStateFromLastImmediateWord] Deleting surrounding text: -"
+            << lastImmediateWordCharCount_ << " " << lastImmediateWordCharCount_;
+        ic_->deleteSurroundingText(-static_cast<int>(lastImmediateWordCharCount_),
+                                   static_cast<int>(lastImmediateWordCharCount_));
+    }
+
+    return items.size();
+}
+
+void UnikeyState::rebuildPreedit(KeySym upcomingSym) {
+    FCITX_UNIKEY_DEBUG() << "[rebuildPreedit] Called upcomingSym=" << upcomingSym;
 
     // Also enable this path for immediate commit.
     if (!immediateCommitMode()) {
@@ -298,10 +446,33 @@ void UnikeyState::rebuildPreedit() {
     FCITX_UNIKEY_DEBUG() << "[rebuildPreedit] Attempting to rebuild from surrounding";
     size_t wordLen = rebuildStateFromSurrounding(true);
     if (wordLen > 0) {
-        FCITX_UNIKEY_DEBUG() << "[rebuildPreedit] Rebuilt " << wordLen << " chars, updating preedit";
+        FCITX_UNIKEY_DEBUG() << "[rebuildPreedit] Rebuilt " << wordLen
+                             << " chars from surrounding, updating preedit";
         updatePreedit();
+        return;
+    }
+
+    // If surrounding rebuild failed but we have a recent immediate-commit word,
+    // this is likely an app (e.g. Firefox) returning stale/empty surrounding
+    // right after commit. Use the last committed word as a safer rewrite
+    // source.
+    if (lastSurroundingRebuildWasStale_ && !lastImmediateWord_.empty()) {
+        FCITX_UNIKEY_DEBUG()
+            << "[rebuildPreedit] Surrounding rebuild failed; trying lastImmediateWord fallback";
+        size_t fallbackLen = rebuildStateFromLastImmediateWord(true, upcomingSym);
+        if (fallbackLen > 0) {
+            FCITX_UNIKEY_DEBUG() << "[rebuildPreedit] Fallback rebuilt "
+                                 << fallbackLen << " chars, updating preedit";
+            updatePreedit();
+            return;
+        }
+
+        // If both surrounding and internal fallback fail, stop using immediate
+        // commit in this context to avoid corrupting text.
+        FCITX_UNIKEY_DEBUG() << "[rebuildPreedit] Fallback failed; marking surrounding unreliable";
+        surroundingTextUnreliable_ = true;
     } else {
-        FCITX_UNIKEY_DEBUG() << "[rebuildPreedit] No word rebuilt";
+        FCITX_UNIKEY_DEBUG() << "[rebuildPreedit] No word rebuilt (no prior immediate word)";
     }
 }
 
