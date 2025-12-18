@@ -56,6 +56,8 @@ FCITX_CONFIGURATION(
     Option<bool> surroundingText{
         this, "SurroundingText",
         _("Restore typing state from surrounding text"), true};
+    Option<bool> modifySurroundingText{this, "ModifySurroundingText",
+                                       _("Modify surrounding text"), false};
     Option<bool> immediateCommit{this, "ImmediateCommit",
                                  _("Immediate Commit Mode"), false};
     Option<bool> displayUnderline{this, "DisplayUnderline",

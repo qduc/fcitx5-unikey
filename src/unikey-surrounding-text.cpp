@@ -88,8 +88,10 @@ void UnikeyState::rebuildFromSurroundingText() {
 
     // Check if output charset is utf8, otherwise it doesn't make much sense.
     // conflict with the rebuildPreedit feature
-    if (!*engine_->config().surroundingText) {
-        FCITX_UNIKEY_DEBUG() << "[rebuildFromSurroundingText] Surrounding text disabled";
+    if (!*engine_->config().surroundingText ||
+        *engine_->config().modifySurroundingText) {
+        FCITX_UNIKEY_DEBUG() << "[rebuildFromSurroundingText] Surrounding text "
+                                "disabled or modifySurroundingText enabled";
         return;
     }
 
@@ -428,8 +430,9 @@ void UnikeyState::rebuildPreedit(KeySym upcomingSym) {
     FCITX_UNIKEY_DEBUG() << "[rebuildPreedit] Called upcomingSym=" << upcomingSym;
 
     // Also enable this path for immediate commit.
-    if (!immediateCommitMode()) {
-        FCITX_UNIKEY_DEBUG() << "[rebuildPreedit] Immediate commit mode not available";
+    if (!immediateCommitMode() && !*engine_->config().modifySurroundingText) {
+        FCITX_UNIKEY_DEBUG() << "[rebuildPreedit] Immediate commit mode not "
+                                "available or modifySurroundingText disabled";
         return;
     }
 
