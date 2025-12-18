@@ -494,8 +494,8 @@ void UnikeyState::rebuildPreedit(KeySym upcomingSym) {
         return;
     }
 
-    if (isFirefox()) {
-        FCITX_UNIKEY_DEBUG() << "[rebuildPreedit] Disabled for Firefox";
+    if (isUnsupportedSurroundingApp()) {
+        FCITX_UNIKEY_DEBUG() << "[rebuildPreedit] Disabled for unsupported app (Firefox/LibreOffice)";
         return;
     }
 

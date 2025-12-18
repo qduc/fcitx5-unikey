@@ -32,7 +32,7 @@ public:
     void updatePreedit();
 
     bool immediateCommitMode() const;
-    bool isFirefox() const;
+    bool isUnsupportedSurroundingApp() const;
     void eraseChars(int num_chars);
     void reset();
 

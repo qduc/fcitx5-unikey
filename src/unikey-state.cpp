@@ -77,9 +77,22 @@ void UnikeyState::keyEvent(KeyEvent &keyEvent) {
     } // end check last keyevent with shift
 }
 
-bool UnikeyState::isFirefox() const {
-    return ic_->program() == "firefox" || ic_->program() == "org.mozilla.firefox" ||
-           ic_->program() == "firefox-bin" || ic_->program() == "Firefox";
+bool UnikeyState::isUnsupportedSurroundingApp() const {
+    const auto prog = ic_->program();
+    // Existing Firefox matches
+    if (prog == "firefox" || prog == "org.mozilla.firefox" ||
+        prog == "firefox-bin" || prog == "Firefox") {
+        return true;
+    }
+    // Treat various LibreOffice frontends as unsupported for surrounding-text
+    // handling (similar to Firefox) due to inconsistent surrounding snapshots.
+    if (prog == "libreoffice" || prog == "LibreOffice" ||
+        prog == "soffice" || prog == "soffice.bin" ||
+        prog == "libreoffice-writer" || prog == "org.libreoffice.LibreOffice") {
+        return true;
+    }
+
+    return false;
 }
 
 bool UnikeyState::immediateCommitMode() const {
@@ -88,8 +101,8 @@ bool UnikeyState::immediateCommitMode() const {
         return false;
     }
 
-    if (isFirefox()) {
-        FCITX_UNIKEY_DEBUG() << "[immediateCommitMode] Disabled for Firefox";
+    if (isUnsupportedSurroundingApp()) {
+        FCITX_UNIKEY_DEBUG() << "[immediateCommitMode] Disabled for unsupported app (Firefox/LibreOffice)";
         return false;
     }
 
