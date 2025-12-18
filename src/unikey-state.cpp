@@ -294,7 +294,69 @@ void UnikeyState::preedit(KeyEvent &keyEvent, bool allowImmediateCommitForThisKe
             return;
         }
 
-        keyStrokes_.pop_back();
+        auto currentLen = utf8::lengthValidated(preeditStr_);
+        if (currentLen == utf8::INVALID_LENGTH) {
+            currentLen = 0;
+        }
+
+        // Loop to pop keystrokes until the number of characters decreases.
+        // This implements "delete whole character" behavior instead of
+        // "progressive undo" (which might just remove a tone).
+        do {
+            keyStrokes_.pop_back();
+
+            // If we started with nothing visible (or invalid), popping one key
+            // is enough.
+            if (currentLen == 0) {
+                break;
+            }
+
+            // Simulate the new state to check length
+            uic_.resetBuf();
+            std::string tempStr;
+            for (auto s : keyStrokes_) {
+                uic_.filter(s);
+                // Replicate syncState logic for string construction
+                if (uic_.backspaces() > 0) {
+                    int k = uic_.backspaces();
+                    int i;
+                    for (i = tempStr.length() - 1; i >= 0 && k > 0; i--) {
+                        unsigned char c = tempStr.at(i);
+                        if (c < 0x80 || c >= 0xC0) {
+                            k--;
+                        }
+                    }
+                    tempStr.erase(i + 1);
+                }
+                if (uic_.bufChars() > 0) {
+                    if (*this->engine_->config().oc == UkConv::XUTF8) {
+                        tempStr.append(
+                            reinterpret_cast<const char *>(uic_.buf()),
+                            uic_.bufChars());
+                    } else {
+                        unsigned char buf[CONVERT_BUF_SIZE + 1];
+                        int bufSize = CONVERT_BUF_SIZE;
+                        latinToUtf(buf, uic_.buf(), uic_.bufChars(), &bufSize);
+                        tempStr.append((const char *)buf,
+                                       CONVERT_BUF_SIZE - bufSize);
+                    }
+                } else if (s != FcitxKey_Shift_L && s != FcitxKey_Shift_R &&
+                           s != FcitxKey_None) {
+                    tempStr.append(utf8::UCS4ToUTF8(s));
+                }
+            }
+
+            auto newLen = utf8::lengthValidated(tempStr);
+            if (newLen == utf8::INVALID_LENGTH) {
+                newLen = 0;
+            }
+
+            if (newLen < currentLen) {
+                break;
+            }
+
+        } while (!keyStrokes_.empty());
+
         uic_.resetBuf();
         preeditStr_.clear();
         for (auto s : keyStrokes_) {
