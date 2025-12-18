@@ -73,6 +73,7 @@ private:
     InputContext *ic_;
     bool lastKeyWithShift_ = false;
     std::string preeditStr_;
+    std::vector<KeySym> keyStrokes_;
     bool autoCommit_ = false;
     KeySym lastShiftPressed_ = FcitxKey_None;
 

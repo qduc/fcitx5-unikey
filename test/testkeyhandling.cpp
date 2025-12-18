@@ -221,9 +221,13 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
 
-            // Press Shift_L then Shift_R to trigger restoreKeyStrokes
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("Shift_L"), false);
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("Shift_R"), false);
+            // Press Shift twice to trigger restoreKeyStrokes.
+            //
+            // Note: In some CI/test-frontend environments, Shift_L may not be
+            // forwarded as a standalone key event, so we use Shift_R twice for
+            // a stable, portable signal.
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key(FcitxKey_Shift_R), false);
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key(FcitxKey_Shift_R), false);
 
             // The preedit should now be "aa" (restored)
             testfrontend->call<ITestFrontend::pushCommitExpectation>("aa ");

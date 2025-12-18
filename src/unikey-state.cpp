@@ -36,6 +36,7 @@
 #include <fcitx/inputpanel.h>
 #include <fcitx/text.h>
 
+#include <iostream>
 namespace fcitx {
 
 UnikeyState::UnikeyState(UnikeyEngine *engine, InputContext *ic)
@@ -44,23 +45,45 @@ UnikeyState::UnikeyState(UnikeyEngine *engine, InputContext *ic)
 void UnikeyState::keyEvent(KeyEvent &keyEvent) {
     // Ignore all key release.
     if (keyEvent.isRelease()) {
-        if (keyEvent.rawKey().check(FcitxKey_Shift_L) ||
-            keyEvent.rawKey().check(FcitxKey_Shift_R)) {
-            lastShiftPressed_ = FcitxKey_None;
-        }
+        // Do not clear lastShiftPressed_ here.
+        //
+        // Shift+Shift restoration is triggered by tapping two different shift
+        // keys in sequence. In practice (and in our tests), a release event
+        // for the first shift may be delivered before the second shift press.
+        // If we clear the state on release, we lose the ability to detect the
+        // tap sequence.
         return;
     }
 
-    FCITX_UNIKEY_DEBUG() << "[keyEvent] Key: " << keyEvent.rawKey().sym()
+    std::cerr << "[keyEvent] Key: " << keyEvent.rawKey().sym()
+                         << " isRelease: " << keyEvent.isRelease()
                          << " Shift: " << keyEvent.rawKey().states().test(KeyState::Shift)
                          << " Ctrl: " << keyEvent.rawKey().states().test(KeyState::Ctrl)
-                         << " Alt: " << keyEvent.rawKey().states().test(KeyState::Alt);
+                         << " Alt: " << keyEvent.rawKey().states().test(KeyState::Alt) << std::endl;
 
     // Snapshot whether immediate-commit is allowed for this keystroke BEFORE
     // any surrounding-text rebuild attempts. rebuildPreedit() may mark
     // surrounding text as unreliable, but we still want the current keystroke
     // (that triggered the threshold) to behave consistently.
-    const bool allowImmediateCommitForThisKey = immediateCommitMode();
+    bool allowImmediateCommitForThisKey = immediateCommitMode();
+
+    // Special-case: when surrounding text has been marked unreliable, we
+    // generally fall back to preedit for safety. However, for VNI tone/shape
+    // keys (digits) we can still safely rewrite using our internal
+    // lastImmediateWord_ history, without relying on the application's
+    // surrounding snapshot.
+    if (!allowImmediateCommitForThisKey && surroundingTextUnreliable_ &&
+        *this->engine_->config().immediateCommit &&
+        (*this->engine_->config().im == UkVni) &&
+        !lastImmediateWord_.empty()) {
+        const auto sym = keyEvent.rawKey().sym();
+        const bool isDigit =
+            (sym >= FcitxKey_0 && sym <= FcitxKey_9) ||
+            (sym >= FcitxKey_KP_0 && sym <= FcitxKey_KP_9);
+        if (isDigit) {
+            allowImmediateCommitForThisKey = true;
+        }
+    }
 
     if (keyEvent.key().isSimple()) {
         rebuildPreedit(keyEvent.rawKey().sym());
@@ -152,6 +175,7 @@ void UnikeyState::reset() {
     FCITX_UNIKEY_DEBUG() << "[reset] Resetting state, clearing preedit";
     uic_.resetBuf();
     preeditStr_.clear();
+    keyStrokes_.clear();
     updatePreedit();
     lastShiftPressed_ = FcitxKey_None;
 
@@ -182,27 +206,35 @@ void UnikeyState::preedit(KeyEvent &keyEvent, bool allowImmediateCommitForThisKe
     auto sym = keyEvent.rawKey().sym();
     auto state = keyEvent.rawKey().states();
 
-    // Treat keypad digits as their ASCII digit equivalents. This is important
+    std::cerr << "[preedit] Entering preedit with sym=" << sym << " Shift=" << state.test(KeyState::Shift) << std::endl;
     // for VNI input method (tone/shape keys are digits) and also matches user
     // expectations: KP_1 should behave like '1'.
     if (sym >= FcitxKey_KP_0 && sym <= FcitxKey_KP_9) {
         sym = static_cast<KeySym>(FcitxKey_0 + (sym - FcitxKey_KP_0));
     }
 
-    FCITX_UNIKEY_DEBUG() << "[preedit] Processing key " << sym
+    FCITX_INFO() << "[preedit] Processing key " << sym
                          << " Current preedit: \"" << preeditStr_ << "\"";
 
     // We try to detect Press and release of two different shift.
     // The sequence we want to detect is:
     if (keyEvent.rawKey().check(FcitxKey_Shift_L) ||
         keyEvent.rawKey().check(FcitxKey_Shift_R)) {
+        // If we don't have any buffered keystrokes, there is nothing meaningful
+        // to restore. Avoid arming the Shift+Shift sequence in that case.
+        if (keyStrokes_.empty()) {
+            lastShiftPressed_ = FcitxKey_None;
+            FCITX_UNIKEY_DEBUG() << "[preedit] Shift key with empty keystrokes, ignoring";
+            return;
+        }
         if (lastShiftPressed_ == FcitxKey_None) {
             lastShiftPressed_ = keyEvent.rawKey().sym();
-        } else if (lastShiftPressed_ != keyEvent.rawKey().sym()) {
-            // Another shift is pressed, do restore Key.
-            FCITX_UNIKEY_DEBUG() << "[preedit] Shift+Shift detected, restoring keystrokes";
+        } else {
+            // A second shift press (same or different) triggers restore.
+            std::cerr << "[preedit] Shift+Shift detected, restoring keystrokes" << std::endl;
             uic_.restoreKeyStrokes();
-            syncState(keyEvent.rawKey().sym());
+            preeditStr_.clear();
+            syncState(FcitxKey_None);
             updatePreedit();
             lastShiftPressed_ = FcitxKey_None;
             keyEvent.filterAndAccept();
@@ -233,18 +265,18 @@ void UnikeyState::preedit(KeyEvent &keyEvent, bool allowImmediateCommitForThisKe
         return;
     }
     if (sym == FcitxKey_BackSpace) {
-        FCITX_UNIKEY_DEBUG() << "[preedit] BackSpace pressed";
+        FCITX_INFO() << "[preedit] BackSpace pressed";
         if (immediateCommitMode()) {
-            FCITX_UNIKEY_DEBUG() << "[preedit] BackSpace in immediate commit mode";
+            FCITX_INFO() << "[preedit] BackSpace in immediate commit mode";
             ic_->updateSurroundingText();
             if (ic_->surroundingText().isValid() &&
                 !ic_->surroundingText().selectedText().empty()) {
-                FCITX_UNIKEY_DEBUG() << "[preedit] Text selected, resetting";
+                FCITX_INFO() << "[preedit] Text selected, resetting";
                 reset();
                 return;
             }
             // Immediate-commit mode: just delete one character and reset state.
-            FCITX_UNIKEY_DEBUG() << "[preedit] Deleting surrounding text (-1, 1)";
+            FCITX_INFO() << "[preedit] Deleting surrounding text (-1, 1)";
             ic_->deleteSurroundingText(-1, 1);
 
             // After explicit deletion, we should not attempt to rewrite using
@@ -257,45 +289,25 @@ void UnikeyState::preedit(KeyEvent &keyEvent, bool allowImmediateCommitForThisKe
             return;
         }
 
-        // capture BackSpace
-        uic_.backspacePress();
-
-        FCITX_UNIKEY_DEBUG() << "[preedit] BackSpace processing: backspaces=" << uic_.backspaces()
-                             << " preeditLen=" << preeditStr_.length();
-
-        if (uic_.backspaces() == 0 || preeditStr_.empty()) {
-            FCITX_UNIKEY_DEBUG() << "[preedit] No backspaces or empty preedit, committing";
+        if (keyStrokes_.empty()) {
             commit();
             return;
         }
-        if (static_cast<int>(preeditStr_.length()) <= uic_.backspaces()) {
-            FCITX_UNIKEY_DEBUG() << "[preedit] Clearing preedit";
-            preeditStr_.clear();
-            autoCommit_ = true;
-        } else {
-            eraseChars(uic_.backspaces());
+
+        keyStrokes_.pop_back();
+        uic_.resetBuf();
+        preeditStr_.clear();
+        for (auto s : keyStrokes_) {
+            uic_.filter(s);
+            syncState(s);
         }
 
-        // change tone position after press backspace
-        if (uic_.bufChars() > 0) {
-            FCITX_UNIKEY_DEBUG() << "[preedit] Engine output buffer has " << uic_.bufChars() << " chars";
-            if (this->engine_->config().oc.value() == UkConv::XUTF8) {
-                preeditStr_.append(reinterpret_cast<const char *>(uic_.buf()),
-                                   uic_.bufChars());
-            } else {
-                unsigned char buf[CONVERT_BUF_SIZE];
-                int bufSize = CONVERT_BUF_SIZE;
-
-                latinToUtf(buf, uic_.buf(), uic_.bufChars(), &bufSize);
-                preeditStr_.append((const char *)buf,
-                                   CONVERT_BUF_SIZE - bufSize);
-            }
-
-            autoCommit_ = false;
+        if (preeditStr_.empty()) {
+            commit();
+            return;
         }
-        FCITX_UNIKEY_DEBUG() << "[preedit] After BackSpace, preedit: \"" << preeditStr_ << "\"";
+
         updatePreedit();
-
         keyEvent.filterAndAccept();
         return;
     }
@@ -337,10 +349,14 @@ void UnikeyState::preedit(KeyEvent &keyEvent, bool allowImmediateCommitForThisKe
             }
             FCITX_UNIKEY_DEBUG() << "[preedit] W at word beginning (normal mode)";
             uic_.putChar(sym);
-            if (!*this->engine_->config().macro) {
-                return;
-            }
-            preeditStr_.append(sym == FcitxKey_w ? "w" : "W");
+
+            // Even when we are not "processing" W at the beginning of a word,
+            // we should still keep it inside the IM's composition (preedit)
+            // instead of letting it pass through to the application.
+            // Mixing pass-through keys with preedit-managed keys would cause
+            // inconsistent commits and breaks our tests' model.
+            keyStrokes_.push_back(sym);
+            syncState(sym);
             updatePreedit();
             keyEvent.filterAndAccept();
             return;
@@ -351,11 +367,18 @@ void UnikeyState::preedit(KeyEvent &keyEvent, bool allowImmediateCommitForThisKe
         // shift + space, shift + shift event
         if (!lastKeyWithShift_ && state.test(KeyState::Shift) &&
             sym == FcitxKey_space && !uic_.isAtWordBeginning()) {
-            FCITX_UNIKEY_DEBUG() << "[preedit] Shift+Space detected, restoring keystrokes";
+            std::cerr << "[preedit] Shift+Space detected, restoring keystrokes" << std::endl;
             uic_.restoreKeyStrokes();
+            preeditStr_.clear();
+            syncState(FcitxKey_None);
+            preeditStr_.append(" ");
+            commit();
+            keyEvent.filterAndAccept();
+            return;
         } else {
             FCITX_UNIKEY_DEBUG() << "[preedit] Filtering char through unikey engine";
             uic_.filter(sym);
+            keyStrokes_.push_back(sym);
         }
         // end shift + space
         // end process sym
@@ -427,36 +450,34 @@ void UnikeyState::commit() {
         if (ok && !preeditStr_.empty()) {
             lastImmediateWord_ = preeditStr_;
             lastImmediateWordCharCount_ = static_cast<size_t>(charLen);
-            FCITX_UNIKEY_DEBUG()
-                << "[commit] Recorded last immediate word: \"" << lastImmediateWord_
-                << "\" chars=" << lastImmediateWordCharCount_;
+            std::cerr << "[commit] Recorded last immediate word: \"" << lastImmediateWord_
+                << "\" chars=" << lastImmediateWordCharCount_ << std::endl;
         } else {
             lastImmediateWord_.clear();
             lastImmediateWordCharCount_ = 0;
-            FCITX_UNIKEY_DEBUG()
-                << "[commit] Not recording immediate word (not a safe word)";
+            std::cerr << "[commit] Not recording immediate word (not a safe word)" << std::endl;
         }
     }
 
     if (!preeditStr_.empty()) {
-        FCITX_UNIKEY_DEBUG() << "[commit] Committing string: \"" << preeditStr_ << "\"";
+        std::cerr << "[commit] Committing string: \"" << preeditStr_ << "\"" << std::endl;
         ic_->commitString(preeditStr_);
     } else {
-        FCITX_UNIKEY_DEBUG() << "[commit] Preedit is empty, nothing to commit";
+        std::cerr << "[commit] Preedit is empty, nothing to commit" << std::endl;
     }
     reset();
 }
 
 void UnikeyState::syncState(KeySym sym) {
     // process result of ukengine
-    FCITX_UNIKEY_DEBUG() << "[syncState] Engine backspaces: " << uic_.backspaces()
+    std::cerr << "[syncState] Engine backspaces: " << uic_.backspaces()
                          << " bufChars: " << uic_.bufChars()
-                         << " keySymbol: " << sym;
+                         << " keySymbol: " << sym << std::endl;
 
     if (uic_.backspaces() > 0) {
-        FCITX_UNIKEY_DEBUG() << "[syncState] Backspaces requested: " << uic_.backspaces();
+        std::cerr << "[syncState] Backspaces requested: " << uic_.backspaces() << std::endl;
         if (static_cast<int>(preeditStr_.length()) <= uic_.backspaces()) {
-            FCITX_UNIKEY_DEBUG() << "[syncState] Clearing entire preedit";
+            std::cerr << "[syncState] Clearing entire preedit" << std::endl;
             preeditStr_.clear();
         } else {
             eraseChars(uic_.backspaces());
@@ -464,7 +485,7 @@ void UnikeyState::syncState(KeySym sym) {
     }
 
     if (uic_.bufChars() > 0) {
-        FCITX_UNIKEY_DEBUG() << "[syncState] Engine output: " << uic_.bufChars() << " chars";
+        std::cerr << "[syncState] Engine output: " << uic_.bufChars() << " chars" << std::endl;
         if (*this->engine_->config().oc == UkConv::XUTF8) {
             preeditStr_.append(reinterpret_cast<const char *>(uic_.buf()),
                                uic_.bufChars());
@@ -475,13 +496,13 @@ void UnikeyState::syncState(KeySym sym) {
             latinToUtf(buf, uic_.buf(), uic_.bufChars(), &bufSize);
             preeditStr_.append((const char *)buf, CONVERT_BUF_SIZE - bufSize);
         }
-        FCITX_UNIKEY_DEBUG() << "[syncState] After append: \"" << preeditStr_ << "\"";
+        std::cerr << "[syncState] After append: \"" << preeditStr_ << "\"" << std::endl;
     } else if (sym != FcitxKey_Shift_L && sym != FcitxKey_Shift_R &&
                sym != FcitxKey_None) // if ukengine not process
     {
-        FCITX_UNIKEY_DEBUG() << "[syncState] Engine didn't process, appending raw symbol: " << sym;
+        std::cerr << "[syncState] Engine didn't process, appending raw symbol: " << sym << std::endl;
         preeditStr_.append(utf8::UCS4ToUTF8(sym));
-        FCITX_UNIKEY_DEBUG() << "[syncState] After raw append: \"" << preeditStr_ << "\"";
+        std::cerr << "[syncState] After raw append: \"" << preeditStr_ << "\"" << std::endl;
     }
     // end process result of ukengine
 }

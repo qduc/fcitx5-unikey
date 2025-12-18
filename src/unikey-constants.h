@@ -14,7 +14,7 @@ namespace fcitx {
 constexpr auto CONVERT_BUF_SIZE = 1024;
 
 // Maximum length of Vietnamese word for rebuild
-constexpr auto MAX_LENGTH_VNWORD = 7;
+constexpr auto MAX_LENGTH_VNWORD = 32;
 
 } // namespace fcitx
 

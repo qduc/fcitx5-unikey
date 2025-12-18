@@ -57,21 +57,27 @@ static bool isRebuildableUnicode(uint32_t unicode, RebuildItem &out) {
 
 static void replayItemsToEngine(UnikeyInputContext &uic,
                                 const std::vector<RebuildItem> &items,
-                                UnikeyState *state) {
+                                UnikeyState *state,
+                                std::vector<KeySym> &keyStrokes) {
     size_t itemCount = 0;
     for (const auto &item : items) {
         if (item.isAscii) {
-            FCITX_UNIKEY_DEBUG() << "[rebuild] Replaying ASCII: " << item.ascii;
+            std::cerr << "[rebuild] Replaying ASCII: " << item.ascii << std::endl;
             uic.filter(item.ascii);
             state->syncState(static_cast<KeySym>(item.ascii));
+            keyStrokes.push_back(static_cast<KeySym>(item.ascii));
         } else {
-            FCITX_UNIKEY_DEBUG() << "[rebuild] Replaying Vietnamese char";
+            std::cerr << "[rebuild] Replaying Vietnamese char" << std::endl;
             uic.rebuildChar(item.vn);
             state->syncState();
+            // For Vietnamese chars, we don't have a single KeySym that
+            // represents it as a keystroke, but we can use the Unicode value.
+            // However, rebuildChar already updated the engine state.
+            // If we want to support BackSpace, we might need a better way.
         }
         itemCount++;
     }
-    FCITX_UNIKEY_DEBUG() << "[rebuild] Replayed " << itemCount << " items";
+    std::cerr << "[rebuild] Replayed " << itemCount << " items" << std::endl;
 }
 
 // Probe the last contiguous "word" before cursor, without mutating UnikeyState.
@@ -245,7 +251,7 @@ void UnikeyState::rebuildFromSurroundingText() {
 }
 
 size_t UnikeyState::rebuildStateFromSurrounding(bool deleteSurrounding) {
-    FCITX_UNIKEY_DEBUG() << "[rebuildStateFromSurrounding] Called with deleteSurrounding=" << deleteSurrounding;
+    std::cerr << "[rebuildStateFromSurrounding] Called with deleteSurrounding=" << deleteSurrounding << std::endl;
 
     // Reset transient stale marker for this attempt.
     lastSurroundingRebuildWasStale_ = false;
@@ -274,6 +280,7 @@ size_t UnikeyState::rebuildStateFromSurrounding(bool deleteSurrounding) {
     // We'll delete it during commit and re-commit the transformed result.
     const auto &text = ic_->surroundingText().text();
     auto cursor = ic_->surroundingText().cursor();
+    std::cerr << "[rebuildStateFromSurrounding] Text: \"" << text << "\" cursor: " << cursor << " lastImmediateWord: \"" << lastImmediateWord_ << "\"" << std::endl;
     auto length = utf8::lengthValidated(text);
     FCITX_UNIKEY_DEBUG() << "[rebuildStateFromSurrounding] Text: \"" << text
                          << "\" cursor: " << cursor << " length: " << length;
@@ -336,10 +343,10 @@ size_t UnikeyState::rebuildStateFromSurrounding(bool deleteSurrounding) {
     }
 
     const size_t wordLength = items.size();
-    FCITX_UNIKEY_DEBUG() << "[rebuildStateFromSurrounding] Collected word length: " << wordLength;
+    std::cerr << "[rebuildStateFromSurrounding] Collected word length: " << wordLength << std::endl;
 
     if (wordLength == 0 || wordLength > MAX_LENGTH_VNWORD) {
-        FCITX_UNIKEY_DEBUG() << "[rebuildStateFromSurrounding] Word length invalid, skipping";
+        std::cerr << "[rebuildStateFromSurrounding] Word length invalid, skipping" << std::endl;
         return 0;
     }
 
@@ -406,11 +413,12 @@ size_t UnikeyState::rebuildStateFromSurrounding(bool deleteSurrounding) {
     FCITX_UNIKEY_DEBUG() << "[rebuildStateFromSurrounding] Resetting engine and preedit, rebuilding word";
     uic_.resetBuf();
     preeditStr_.clear();
+    keyStrokes_.clear();
 
     // Rebuild ukengine state and our composing string by replaying the
     // current word. For ASCII characters we need filtering, otherwise the
     // engine won't recognize sequences like "aa" -> "â".
-    replayItemsToEngine(uic_, items, this);
+    replayItemsToEngine(uic_, items, this, keyStrokes_);
 
     if (deleteSurrounding) {
         FCITX_UNIKEY_DEBUG() << "[rebuildStateFromSurrounding] Deleting surrounding text: -"
@@ -467,8 +475,9 @@ size_t UnikeyState::rebuildStateFromLastImmediateWord(bool deleteSurrounding, Ke
     // Reset local composing buffer and engine state before rebuilding.
     uic_.resetBuf();
     preeditStr_.clear();
+    keyStrokes_.clear();
 
-    replayItemsToEngine(uic_, items, this);
+    replayItemsToEngine(uic_, items, this, keyStrokes_);
 
     if (deleteSurrounding) {
         FCITX_UNIKEY_DEBUG()
@@ -482,7 +491,7 @@ size_t UnikeyState::rebuildStateFromLastImmediateWord(bool deleteSurrounding, Ke
 }
 
 void UnikeyState::rebuildPreedit(KeySym upcomingSym) {
-    FCITX_UNIKEY_DEBUG() << "[rebuildPreedit] Called upcomingSym=" << upcomingSym;
+    std::cerr << "[rebuildPreedit] Called upcomingSym=" << upcomingSym << std::endl;
 
     // Also enable this path for immediate commit.
     // NOTE: When surroundingTextUnreliable_ is true, immediateCommitMode() is
@@ -490,27 +499,31 @@ void UnikeyState::rebuildPreedit(KeySym upcomingSym) {
     // allow recovery, but we must not rewrite/delete surrounding nor mutate
     // composing state.
     if (!*engine_->config().immediateCommit && !*engine_->config().modifySurroundingText) {
-        FCITX_UNIKEY_DEBUG() << "[rebuildPreedit] Disabled by config";
+        std::cerr << "[rebuildPreedit] Disabled by config" << std::endl;
         return;
     }
 
     if (isUnsupportedSurroundingApp()) {
-        FCITX_UNIKEY_DEBUG() << "[rebuildPreedit] Disabled for unsupported app (Firefox/LibreOffice)";
+        std::cerr << "[rebuildPreedit] Disabled for unsupported app" << std::endl;
         return;
     }
 
     if (*engine_->config().oc != UkConv::XUTF8) {
-        FCITX_UNIKEY_DEBUG() << "[rebuildPreedit] Output charset is not XUTF8";
+        std::cerr << "[rebuildPreedit] Output charset is not XUTF8" << std::endl;
         return;
     }
 
-    if (!uic_.isAtWordBeginning()) {
-        FCITX_UNIKEY_DEBUG() << "[rebuildPreedit] Not at word beginning";
+    bool atWordBeginning = uic_.isAtWordBeginning();
+    std::cerr << "[rebuildPreedit] isAtWordBeginning=" << atWordBeginning << std::endl;
+    if (!atWordBeginning) {
+        std::cerr << "[rebuildPreedit] Not at word beginning" << std::endl;
         return;
     }
 
-    if (!ic_->capabilityFlags().test(CapabilityFlag::SurroundingText)) {
-        FCITX_UNIKEY_DEBUG() << "[rebuildPreedit] SurroundingText capability not available";
+    bool hasSurrounding = ic_->capabilityFlags().test(CapabilityFlag::SurroundingText);
+    std::cerr << "[rebuildPreedit] hasSurrounding=" << hasSurrounding << " unreliable=" << surroundingTextUnreliable_ << std::endl;
+    if (!hasSurrounding) {
+        std::cerr << "[rebuildPreedit] SurroundingText capability not available" << std::endl;
         return;
     }
 
@@ -518,6 +531,28 @@ void UnikeyState::rebuildPreedit(KeySym upcomingSym) {
     // to rebuild/delete/modify state. Only probe the surrounding snapshot and
     // count consecutive successes to recover.
     if (surroundingTextUnreliable_) {
+        // Even in unreliable mode, we can still support VNI tone/shape keys
+        // by rebuilding from our own lastImmediateWord_ history (instead of
+        // trusting the application's surrounding snapshot). This enables fast
+        // typing scenarios where surrounding updates lag behind.
+        if (*engine_->config().immediateCommit &&
+            *engine_->config().im == UkVni &&
+            !lastImmediateWord_.empty()) {
+            const bool isDigit =
+                (upcomingSym >= FcitxKey_0 && upcomingSym <= FcitxKey_9) ||
+                (upcomingSym >= FcitxKey_KP_0 && upcomingSym <= FcitxKey_KP_9);
+            if (isDigit) {
+                FCITX_UNIKEY_DEBUG()
+                    << "[rebuildPreedit] Unreliable: VNI digit key, rebuilding from lastImmediateWord";
+                const size_t fallbackLen =
+                    rebuildStateFromLastImmediateWord(true, upcomingSym);
+                if (fallbackLen > 0) {
+                    updatePreedit();
+                    return;
+                }
+            }
+        }
+
         ic_->updateSurroundingText();
         const size_t probeLen = probeWordLengthFromSurrounding(ic_->surroundingText());
         if (probeLen > 0) {
@@ -540,11 +575,11 @@ void UnikeyState::rebuildPreedit(KeySym upcomingSym) {
         return;
     }
 
-    FCITX_UNIKEY_DEBUG() << "[rebuildPreedit] Attempting to rebuild from surrounding";
+    std::cerr << "[rebuildPreedit] Attempting to rebuild from surrounding" << std::endl;
     size_t wordLen = rebuildStateFromSurrounding(true);
     if (wordLen > 0) {
-        FCITX_UNIKEY_DEBUG() << "[rebuildPreedit] Rebuilt " << wordLen
-                             << " chars from surrounding, updating preedit";
+        std::cerr << "[rebuildPreedit] Rebuilt " << wordLen
+                             << " chars from surrounding, updating preedit" << std::endl;
         // Successful rebuild: track success for potential recovery.
         surroundingSuccessCount_++;
         surroundingFailureCount_ = 0;  // Reset failure streak.
