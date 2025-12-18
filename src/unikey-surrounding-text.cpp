@@ -451,6 +451,18 @@ void UnikeyState::rebuildPreedit(KeySym upcomingSym) {
     if (wordLen > 0) {
         FCITX_UNIKEY_DEBUG() << "[rebuildPreedit] Rebuilt " << wordLen
                              << " chars from surrounding, updating preedit";
+        // Successful rebuild: track success for potential recovery.
+        surroundingSuccessCount_++;
+        surroundingFailureCount_ = 0;  // Reset failure streak.
+        if (surroundingTextUnreliable_ &&
+            surroundingSuccessCount_ >= kSurroundingRecoveryThreshold) {
+            FCITX_UNIKEY_DEBUG()
+                << "[rebuildPreedit] Surrounding text has been reliable for "
+                << surroundingSuccessCount_
+                << " operations, recovering from unreliable state";
+            surroundingTextUnreliable_ = false;
+            surroundingSuccessCount_ = 0;
+        }
         updatePreedit();
         return;
     }
@@ -466,16 +478,47 @@ void UnikeyState::rebuildPreedit(KeySym upcomingSym) {
         if (fallbackLen > 0) {
             FCITX_UNIKEY_DEBUG() << "[rebuildPreedit] Fallback rebuilt "
                                  << fallbackLen << " chars, updating preedit";
+            // Fallback succeeded, but this still indicates surrounding was
+            // stale. Count as a failure for the detection logic.
+            surroundingFailureCount_++;
+            surroundingSuccessCount_ = 0;
+            FCITX_UNIKEY_DEBUG()
+                << "[rebuildPreedit] Surrounding failure count: "
+                << surroundingFailureCount_ << "/" << kSurroundingFailureThreshold;
             updatePreedit();
             return;
         }
 
-        // If both surrounding and internal fallback fail, stop using immediate
-        // commit in this context to avoid corrupting text.
-        FCITX_UNIKEY_DEBUG() << "[rebuildPreedit] Fallback failed; marking surrounding unreliable";
-        surroundingTextUnreliable_ = true;
+        // Both surrounding and internal fallback failed. Increment failure
+        // count and only mark as unreliable after reaching the threshold.
+        surroundingFailureCount_++;
+        surroundingSuccessCount_ = 0;
+        FCITX_UNIKEY_DEBUG()
+            << "[rebuildPreedit] Both surrounding and fallback failed; failure count: "
+            << surroundingFailureCount_ << "/" << kSurroundingFailureThreshold;
+
+        if (surroundingFailureCount_ >= kSurroundingFailureThreshold) {
+            FCITX_UNIKEY_DEBUG()
+                << "[rebuildPreedit] Failure threshold reached; marking surrounding unreliable";
+            surroundingTextUnreliable_ = true;
+        }
+    } else if (lastSurroundingRebuildWasStale_ && lastImmediateWord_.empty()) {
+        // Staleness detected but no fallback word available. This could
+        // indicate a problematic app even without lastImmediateWord_. Count
+        // it as a failure.
+        surroundingFailureCount_++;
+        surroundingSuccessCount_ = 0;
+        FCITX_UNIKEY_DEBUG()
+            << "[rebuildPreedit] Surrounding stale but no fallback word; failure count: "
+            << surroundingFailureCount_ << "/" << kSurroundingFailureThreshold;
+
+        if (surroundingFailureCount_ >= kSurroundingFailureThreshold) {
+            FCITX_UNIKEY_DEBUG()
+                << "[rebuildPreedit] Failure threshold reached; marking surrounding unreliable";
+            surroundingTextUnreliable_ = true;
+        }
     } else {
-        FCITX_UNIKEY_DEBUG() << "[rebuildPreedit] No word rebuilt (no prior immediate word)";
+        FCITX_UNIKEY_DEBUG() << "[rebuildPreedit] No word rebuilt (no prior immediate word, not stale)";
     }
 }
 

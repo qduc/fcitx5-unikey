@@ -9,3 +9,8 @@ add_executable(testunikey testunikey.cpp)
 target_link_libraries(testunikey Fcitx5::Core Fcitx5::Module::TestFrontend)
 add_dependencies(testunikey unikey copy-addon copy-im)
 add_test(NAME testunikey COMMAND testunikey)
+
+add_executable(testsurroundingtext testsurroundingtext.cpp)
+target_link_libraries(testsurroundingtext Fcitx5::Core Fcitx5::Module::TestFrontend)
+add_dependencies(testsurroundingtext unikey copy-addon copy-im)
+add_test(NAME testsurroundingtext COMMAND testsurroundingtext)

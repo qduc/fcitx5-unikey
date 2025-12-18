@@ -137,8 +137,9 @@ void UnikeyState::reset() {
     lastShiftPressed_ = FcitxKey_None;
 
     // Do not clear surroundingTextUnreliable_ here: reset() may be triggered by
-    // applications frequently. Keeping this sticky avoids flapping between
-    // modes in apps that provide inconsistent surrounding text.
+    // applications frequently (e.g., on every key). Keeping it here would cause
+    // constant flapping. We reset it in clearImmediateCommitHistory() instead,
+    // which is only called on InputContextReset (focus change).
 }
 
 void UnikeyState::clearImmediateCommitHistory() {
@@ -149,6 +150,13 @@ void UnikeyState::clearImmediateCommitHistory() {
     lastImmediateWordCharCount_ = 0;
     recordNextCommitAsImmediateWord_ = false;
     lastSurroundingRebuildWasStale_ = false;
+
+    // On focus change, give the new context a fresh chance. The new
+    // application (or even a different field in the same app) may
+    // provide reliable surrounding text.
+    surroundingTextUnreliable_ = false;
+    surroundingFailureCount_ = 0;
+    surroundingSuccessCount_ = 0;
 }
 
 void UnikeyState::preedit(KeyEvent &keyEvent) {

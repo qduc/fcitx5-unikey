@@ -55,6 +55,18 @@ public:
     // composition (preedit) to avoid corrupting text.
     bool surroundingTextUnreliable_ = false;
 
+    // Count consecutive surrounding text rebuild failures before marking
+    // as unreliable. This prevents a single fluke from permanently
+    // disabling immediate commit mode.
+    static constexpr int kSurroundingFailureThreshold = 2;
+    int surroundingFailureCount_ = 0;
+
+    // Count consecutive successful surrounding operations. Used to recover
+    // from the unreliable state if the application starts providing
+    // accurate surrounding text again.
+    static constexpr int kSurroundingRecoveryThreshold = 3;
+    int surroundingSuccessCount_ = 0;
+
 private:
     UnikeyEngine *engine_;
     UnikeyInputContext uic_;
