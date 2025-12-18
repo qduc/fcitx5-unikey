@@ -14,3 +14,8 @@ add_executable(testsurroundingtext testsurroundingtext.cpp)
 target_link_libraries(testsurroundingtext Fcitx5::Core Fcitx5::Module::TestFrontend)
 add_dependencies(testsurroundingtext unikey copy-addon copy-im)
 add_test(NAME testsurroundingtext COMMAND testsurroundingtext)
+
+add_executable(testkeyhandling testkeyhandling.cpp)
+target_link_libraries(testkeyhandling Fcitx5::Core Fcitx5::Module::TestFrontend)
+add_dependencies(testkeyhandling unikey copy-addon copy-im)
+add_test(NAME testkeyhandling COMMAND testkeyhandling)

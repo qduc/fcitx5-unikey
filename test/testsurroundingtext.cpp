@@ -447,6 +447,209 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("3"), false);
         }
 
+        // ==========================================================
+        // ADDITIONAL HIGH-VALUE TESTS
+        // ==========================================================
+
+        // --- Case 13: ModifySurroundingText with Vietnamese text present ---
+        // When modifySurroundingText is enabled, existing Vietnamese text
+        // should be rebuilt and modified correctly.
+        {
+            FCITX_INFO() << "testsurroundingtext: Case 13";
+            RawConfig cfg = base;
+            cfg.setValueByPath("ImmediateCommit", "False");
+            cfg.setValueByPath("ModifySurroundingText", "True");
+            configureUnikey(unikey, cfg);
+
+            ic->reset();
+            // Set up Vietnamese text with cursor at end
+            ic->surroundingText().setText("nga", 3, 3);
+            ic->updateSurroundingText();
+
+            // Type 's' to add tone - should work with ModifySurroundingText
+            FCITX_INFO() << "testsurroundingtext: Case 13 key 1";
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("1"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("ngá");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("Return"),
+                                                        false);
+        }
+
+        // --- Case 14: ImmediateCommit takes precedence over
+        // ModifySurroundingText --- When both are enabled, immediateCommit
+        // behavior should apply.
+        {
+            FCITX_INFO() << "testsurroundingtext: Case 14";
+            RawConfig cfg = base;
+            cfg.setValueByPath("ImmediateCommit", "True");
+            cfg.setValueByPath("ModifySurroundingText", "True");
+            configureUnikey(unikey, cfg);
+
+            ic->reset();
+            ic->surroundingText().setText("", 0, 0);
+            ic->updateSurroundingText();
+
+            // Build a word with surrounding updates
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("a");
+            FCITX_INFO() << "testsurroundingtext: Case 14 key a";
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
+            ic->surroundingText().setText("a", 1, 1);
+            ic->updateSurroundingText();
+
+            // Add circumflex - should work in immediate commit mode
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("â");
+            FCITX_INFO() << "testsurroundingtext: Case 14 key 6";
+            // VNI: 6 adds circumflex
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("6"), false);
+        }
+
+        // --- Case 15: Surrounding text with word boundary at cursor ---
+        // When cursor is right after a word boundary, no rebuild should occur.
+        {
+            FCITX_INFO() << "testsurroundingtext: Case 15";
+            RawConfig cfg = base;
+            cfg.setValueByPath("ImmediateCommit", "True");
+            cfg.setValueByPath("ModifySurroundingText", "False");
+            configureUnikey(unikey, cfg);
+
+            ic->reset();
+            // Text with space before cursor
+            ic->surroundingText().setText("hello ", 6, 6);
+            ic->updateSurroundingText();
+
+            // Type 'a' - should just commit 'a' without rebuild
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("a");
+            FCITX_INFO() << "testsurroundingtext: Case 15 key a";
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
+        }
+
+        // --- Case 16: Very long word approaching MAX_LENGTH_VNWORD ---
+        // Ensure the rebuild logic handles long words correctly.
+        {
+            FCITX_INFO() << "testsurroundingtext: Case 16";
+            RawConfig cfg = base;
+            cfg.setValueByPath("ImmediateCommit", "True");
+            cfg.setValueByPath("ModifySurroundingText", "False");
+            configureUnikey(unikey, cfg);
+
+            ic->reset();
+            // 15-character word (MAX_LENGTH_VNWORD is around 18)
+            ic->surroundingText().setText("nghiencuukhoa", 13, 13);
+            ic->updateSurroundingText();
+
+            // Add tone - should rebuild and work correctly
+            testfrontend->call<ITestFrontend::pushCommitExpectation>(
+                "nghiêncuukhoa");
+            FCITX_INFO() << "testsurroundingtext: Case 16 key 6";
+            // VNI: 6 adds circumflex to 'e'
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("6"), false);
+        }
+
+        // --- Case 17: Mixed ASCII and Vietnamese in surrounding ---
+        // Ensure proper word boundary detection with mixed content.
+        {
+            FCITX_INFO() << "testsurroundingtext: Case 17";
+            RawConfig cfg = base;
+            cfg.setValueByPath("ImmediateCommit", "True");
+            cfg.setValueByPath("ModifySurroundingText", "False");
+            configureUnikey(unikey, cfg);
+
+            ic->reset();
+            // Vietnamese word followed by cursor
+            ic->surroundingText().setText("Việt Nam toi", 12, 12);
+            ic->updateSurroundingText();
+
+            // Add tone to "toi" -> "tôi"
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("tôi");
+            FCITX_INFO() << "testsurroundingtext: Case 17 key 6";
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("6"), false);
+        }
+
+        // --- Case 18: Cursor at beginning of document ---
+        // Ensure no underflow when cursor is at position 0.
+        {
+            FCITX_INFO() << "testsurroundingtext: Case 18";
+            RawConfig cfg = base;
+            cfg.setValueByPath("ImmediateCommit", "True");
+            cfg.setValueByPath("ModifySurroundingText", "False");
+            configureUnikey(unikey, cfg);
+
+            ic->reset();
+            // Cursor at position 0 with text after cursor
+            ic->surroundingText().setText("hello", 0, 0);
+            ic->updateSurroundingText();
+
+            // Should just commit 'a' without trying to access text before
+            // cursor
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("a");
+            FCITX_INFO() << "testsurroundingtext: Case 18 key a";
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
+        }
+
+        // --- Case 19: Rapid consecutive keystrokes with stale surrounding ---
+        // Simulating fast typing where surrounding text can't keep up.
+        {
+            FCITX_INFO() << "testsurroundingtext: Case 19";
+            RawConfig cfg = base;
+            cfg.setValueByPath("ImmediateCommit", "True");
+            cfg.setValueByPath("ModifySurroundingText", "False");
+            configureUnikey(unikey, cfg);
+
+            ic->reset();
+            ic->surroundingText().setText("", 0, 0);
+            ic->updateSurroundingText();
+
+            // Rapid typing: "toi6" without surrounding updates
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("t");
+            FCITX_INFO() << "testsurroundingtext: Case 19 key t";
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("t"), false);
+
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("to");
+            FCITX_INFO() << "testsurroundingtext: Case 19 key o";
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("o"), false);
+
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("toi");
+            FCITX_INFO() << "testsurroundingtext: Case 19 key i";
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("i"), false);
+
+            // Add circumflex - using fallback since no surrounding updates
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("tôi");
+            FCITX_INFO() << "testsurroundingtext: Case 19 key 6";
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("6"), false);
+        }
+
+        // --- Case 20: Backspace clears immediate word history ---
+        // After explicit deletion, immediate word tracking should be cleared.
+        {
+            FCITX_INFO() << "testsurroundingtext: Case 20";
+            RawConfig cfg = base;
+            cfg.setValueByPath("ImmediateCommit", "True");
+            cfg.setValueByPath("ModifySurroundingText", "False");
+            configureUnikey(unikey, cfg);
+
+            ic->reset();
+            ic->surroundingText().setText("a", 1, 1);
+            ic->updateSurroundingText();
+
+            // Type 'b'
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("ab");
+            FCITX_INFO() << "testsurroundingtext: Case 20 key b";
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("b"), false);
+
+            // Now backspace
+            ic->surroundingText().setText("ab", 2, 2);
+            ic->updateSurroundingText();
+            FCITX_INFO() << "testsurroundingtext: Case 20 key BackSpace";
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("BackSpace"),
+                                                        false);
+
+            // Type new character - should start fresh context
+            ic->surroundingText().setText("a", 1, 1);
+            ic->updateSurroundingText();
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("á");
+            FCITX_INFO() << "testsurroundingtext: Case 20 key 1";
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("1"), false);
+        }
+
         instance->deactivate();
         dispatcher->schedule([dispatcher, instance]() {
             dispatcher->detach();
