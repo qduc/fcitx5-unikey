@@ -160,15 +160,6 @@ UnikeyEngine::UnikeyEngine(Instance *instance)
         }));
     uiManager.registerAction("unikey-macro", macroAction_.get());
 
-    eventWatchers_.emplace_back(instance_->watchEvent(
-        EventType::InputContextSurroundingTextUpdated,
-        EventWatcherPhase::PostInputMethod, [this](Event &event) {
-            auto &icEvent = static_cast<InputContextEvent &>(event);
-            auto *ic = icEvent.inputContext();
-            auto *state = ic->propertyFor(&factory_);
-            state->mayRebuildStateFromSurroundingText_ = true;
-        }));
-
     reloadConfig();
 }
 
@@ -184,10 +175,6 @@ void UnikeyEngine::activate(const InputMethodEntry & /*entry*/,
 
     auto *ic = event.inputContext();
     updateUI(ic);
-    auto *state = ic->propertyFor(&factory_);
-    if (ic->capabilityFlags().test(CapabilityFlag::SurroundingText)) {
-        state->mayRebuildStateFromSurroundingText_ = true;
-    }
 }
 
 void UnikeyEngine::deactivate(const InputMethodEntry &entry,
@@ -203,7 +190,6 @@ void UnikeyEngine::keyEvent(const InputMethodEntry & /*entry*/,
                             KeyEvent &keyEvent) {
     auto *ic = keyEvent.inputContext();
     auto *state = ic->propertyFor(&factory_);
-    state->rebuildFromSurroundingText();
     state->keyEvent(keyEvent);
 }
 
@@ -217,10 +203,6 @@ void UnikeyEngine::reset(const InputMethodEntry & /*entry*/,
         // Reset should also clear any immediate-commit rewrite history: the
         // surrounding context may have changed (focus change, app reset, etc.).
         state->clearImmediateCommitHistory();
-        if (event.inputContext()->capabilityFlags().test(
-                CapabilityFlag::SurroundingText)) {
-            state->mayRebuildStateFromSurroundingText_ = true;
-        }
     }
 }
 

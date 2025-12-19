@@ -181,7 +181,9 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
         }
 
         // --- Test: Backspace in immediate commit mode with selection ---
-        // When there's a selection, backspace should pass through in immediate mode.
+        // Selection is tracked internally (via key events like Ctrl+A/Shift+Arrow).
+        // In immediate-commit mode, we handle deletion ourselves to keep internal
+        // state consistent.
         if (shouldRunCase(selCopy, 4)) {
             announceCase(4);
             FCITX_INFO() << "testkeyhandling: Case 4 - Backspace with selection in immediate commit mode";
@@ -190,13 +192,20 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             unikey->setConfig(config);
 
             ic->reset();
-            // Text "hello" with selection from 0 to 5 (entire text selected)
-            ic->surroundingText().setText("hello", 0, 5);
-            ic->updateSurroundingText();
 
-            // Backspace should pass through when there's a selection
-            // (the application handles deletion of selected text)
+            // Build some text so we can create a selection.
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("a");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("ab");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("b"), false);
+
+            // Select all and delete.
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("Control+a"), false);
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("BackSpace"), false);
+
+            // Now typing should start fresh.
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("c");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("c"), false);
         }
 
         // ==========================================================

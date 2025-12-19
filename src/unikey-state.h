@@ -10,6 +10,8 @@
 #include <fcitx/inputcontextproperty.h>
 #include <fcitx/event.h>
 #include <fcitx-utils/keysym.h>
+#include <fcitx-utils/utf8.h>
+#include <optional>
 #include "unikeyinputcontext.h"
 #include <string>
 
@@ -26,48 +28,76 @@ public:
     void keyEvent(KeyEvent &keyEvent);
     void clearImmediateCommitHistory();
     void preedit(KeyEvent &keyEvent, bool allowImmediateCommitForThisKey);
-    void handleIgnoredKey();
+    void handleIgnoredKey(KeySym sym, const KeyStates &state);
     void commit();
     void syncState(KeySym sym = FcitxKey_None);
     void updatePreedit();
 
     bool immediateCommitMode() const;
-    bool isUnsupportedSurroundingApp() const;
     void eraseChars(int num_chars);
     void reset();
-
-    void rebuildFromSurroundingText();
-    size_t rebuildStateFromSurrounding(bool deleteSurrounding);
-    size_t rebuildStateFromLastImmediateWord(bool deleteSurrounding, KeySym upcomingSym);
     void rebuildPreedit(KeySym upcomingSym);
 
-    bool mayRebuildStateFromSurroundingText_ = false;
-
-    // Transient flag set by rebuildStateFromSurrounding(): true if the rebuild
-    // failed because surrounding text appears stale/truncated compared to the
-    // last immediate-commit word. Used to decide whether it's appropriate to
-    // use the lastImmediateWord_ fallback.
-    bool lastSurroundingRebuildWasStale_ = false;
-
-    // If surrounding text from the application is unreliable (e.g. Firefox
-    // temporarily returns stale/empty surrounding text after a commit), we
-    // should stop using immediate-commit mode and fall back to regular
-    // composition (preedit) to avoid corrupting text.
-    bool surroundingTextUnreliable_ = false;
-
-    // Count consecutive surrounding text rebuild failures before marking
-    // as unreliable. This prevents a single fluke from permanently
-    // disabling immediate commit mode.
-    static constexpr int kSurroundingFailureThreshold = 2;
-    int surroundingFailureCount_ = 0;
-
-    // Count consecutive successful surrounding operations. Used to recover
-    // from the unreliable state if the application starts providing
-    // accurate surrounding text again.
-    static constexpr int kSurroundingRecoveryThreshold = 3;
-    int surroundingSuccessCount_ = 0;
+    // Clears internal state that should only be reset on focus change.
+    // Called from UnikeyEngine on InputContextReset.
+    void clearInternalTextState();
 
 private:
+    struct InternalTextState {
+        // UTF-8 text buffer and cursor position in Unicode code points.
+        std::string text;
+        size_t cursor = 0;
+        std::optional<size_t> selectionAnchor; // code point index
+
+        bool hasSelection() const {
+            return selectionAnchor && *selectionAnchor != cursor;
+        }
+
+        std::pair<size_t, size_t> selectionRange() const {
+            if (!hasSelection()) {
+                return {cursor, cursor};
+            }
+            return {std::min(cursor, *selectionAnchor),
+                    std::max(cursor, *selectionAnchor)};
+        }
+
+        void clearSelection() { selectionAnchor.reset(); }
+
+        void clear() {
+            text.clear();
+            cursor = 0;
+            selectionAnchor.reset();
+        }
+
+        // Clamp cursor to valid range (0..len).
+        void clampCursor();
+
+        // Delete a range [start, end) in code points.
+        void eraseRange(size_t start, size_t end);
+
+        // Insert UTF-8 at cursor (replaces selection if any).
+        void insertText(const std::string &utf8);
+
+        // Backspace/delete semantics (operate on selection if any).
+        void backspace();
+        void del();
+
+        // Cursor movement.
+        void moveLeft(bool byWord, bool extendSelection);
+        void moveRight(bool byWord, bool extendSelection);
+        void moveHome(bool extendSelection);
+        void moveEnd(bool extendSelection);
+
+        // Utility: length in code points (0 if invalid UTF-8).
+        size_t length() const;
+    };
+
+    void applyPassThroughKeyToInternalState(KeySym sym, const KeyStates &state);
+
+    // Delete text around cursor (like deleteSurroundingText) AND keep internal
+    // state consistent.
+    void deleteAroundCursor(int offset, int size);
+
     UnikeyEngine *engine_;
     UnikeyInputContext uic_;
     InputContext *ic_;
@@ -77,12 +107,7 @@ private:
     bool autoCommit_ = false;
     KeySym lastShiftPressed_ = FcitxKey_None;
 
-    // Last committed word in immediate-commit mode (UTF-8) and its character
-    // count (Unicode code points). Used as a safe fallback when surrounding
-    // text is temporarily stale/empty.
-    std::string lastImmediateWord_;
-    size_t lastImmediateWordCharCount_ = 0;
-    bool recordNextCommitAsImmediateWord_ = false;
+    InternalTextState internal_;
 };
 
 } // namespace fcitx
