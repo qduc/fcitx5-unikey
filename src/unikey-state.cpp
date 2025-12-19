@@ -155,9 +155,6 @@ void UnikeyState::eraseChars(int num_chars) {
     unsigned char c;
     k = num_chars;
 
-    FCITX_UNIKEY_DEBUG() << "[eraseChars] Erasing " << num_chars
-                         << " chars from preedit: \"" << preeditStr_ << "\"";
-
     for (i = preeditStr_.length() - 1; i >= 0 && k > 0; i--) {
         c = preeditStr_.at(i);
 
@@ -168,11 +165,9 @@ void UnikeyState::eraseChars(int num_chars) {
     }
 
     preeditStr_.erase(i + 1);
-    FCITX_UNIKEY_DEBUG() << "[eraseChars] After erase: \"" << preeditStr_ << "\"";
 }
 
 void UnikeyState::reset() {
-    FCITX_UNIKEY_DEBUG() << "[reset] Resetting state, clearing preedit";
     uic_.resetBuf();
     preeditStr_.clear();
     keyStrokes_.clear();
@@ -224,7 +219,6 @@ void UnikeyState::preedit(KeyEvent &keyEvent, bool allowImmediateCommitForThisKe
         // to restore. Avoid arming the Shift+Shift sequence in that case.
         if (keyStrokes_.empty()) {
             lastShiftPressed_ = FcitxKey_None;
-            FCITX_UNIKEY_DEBUG() << "[preedit] Shift key with empty keystrokes, ignoring";
             return;
         }
         if (lastShiftPressed_ == FcitxKey_None) {
@@ -251,17 +245,14 @@ void UnikeyState::preedit(KeyEvent &keyEvent, bool allowImmediateCommitForThisKe
         sym == FcitxKey_KP_Enter ||
         (sym >= FcitxKey_Home && sym <= FcitxKey_Insert) ||
         (sym >= FcitxKey_KP_Home && sym <= FcitxKey_KP_Delete)) {
-        FCITX_UNIKEY_DEBUG() << "[preedit] Handling ignored key";
         handleIgnoredKey();
         return;
     }
     if (state.test(KeyState::Super)) {
-        FCITX_UNIKEY_DEBUG() << "[preedit] Super key pressed, ignoring";
         return;
     }
     if ((sym >= FcitxKey_Caps_Lock && sym <= FcitxKey_Hyper_R) ||
         sym == FcitxKey_Shift_L || sym == FcitxKey_Shift_R) {
-        FCITX_UNIKEY_DEBUG() << "[preedit] Modifier key, ignoring";
         return;
     }
     if (sym == FcitxKey_BackSpace) {
@@ -379,14 +370,10 @@ void UnikeyState::preedit(KeyEvent &keyEvent, bool allowImmediateCommitForThisKe
     }
     if (sym >= FcitxKey_space && sym <= FcitxKey_asciitilde) {
         // capture ascii printable char
-        FCITX_UNIKEY_DEBUG() << "[preedit] Printable char: " << static_cast<char>(sym)
-                             << " (code: " << sym << ")";
         uic_.setCapsState(state.test(KeyState::Shift),
                           state.test(KeyState::CapsLock));
 
         const bool immediateCommit = allowImmediateCommitForThisKey;
-        FCITX_UNIKEY_DEBUG() << "[preedit] ImmediateCommit mode (snapshotted): "
-                     << immediateCommit;
 
         // process sym
 
@@ -438,7 +425,6 @@ void UnikeyState::preedit(KeyEvent &keyEvent, bool allowImmediateCommitForThisKe
             keyEvent.filterAndAccept();
             return;
         } else {
-            FCITX_UNIKEY_DEBUG() << "[preedit] Filtering char through unikey engine";
             uic_.filter(sym);
             keyStrokes_.push_back(sym);
         }
@@ -469,7 +455,6 @@ void UnikeyState::preedit(KeyEvent &keyEvent, bool allowImmediateCommitForThisKe
         }
         // end commit string
 
-        FCITX_UNIKEY_DEBUG() << "[preedit] After processing, preedit: \"" << preeditStr_ << "\"";
         updatePreedit();
         keyEvent.filterAndAccept();
         return;
@@ -480,7 +465,6 @@ void UnikeyState::preedit(KeyEvent &keyEvent, bool allowImmediateCommitForThisKe
 }
 
 void UnikeyState::handleIgnoredKey() {
-    FCITX_UNIKEY_DEBUG() << "[handleIgnoredKey] Processing ignored key";
     uic_.filter(0);
     syncState();
 
@@ -570,8 +554,6 @@ void UnikeyState::syncState(KeySym sym) {
 }
 
 void UnikeyState::updatePreedit() {
-    FCITX_UNIKEY_DEBUG() << "[updatePreedit] Updating preedit: \"" << preeditStr_ << "\"";
-
     auto &inputPanel = ic_->inputPanel();
 
     inputPanel.reset();
@@ -579,8 +561,6 @@ void UnikeyState::updatePreedit() {
     if (!preeditStr_.empty()) {
         const auto useClientPreedit =
             ic_->capabilityFlags().test(CapabilityFlag::Preedit);
-        FCITX_UNIKEY_DEBUG() << "[updatePreedit] Using " << (useClientPreedit ? "client" : "server")
-                             << " preedit";
         Text preedit(preeditStr_,
                      useClientPreedit && *this->engine_->config().displayUnderline
                          ? TextFormatFlag::Underline
@@ -591,8 +571,6 @@ void UnikeyState::updatePreedit() {
         } else {
             inputPanel.setPreedit(preedit);
         }
-    } else {
-        FCITX_UNIKEY_DEBUG() << "[updatePreedit] Preedit is empty";
     }
     ic_->updatePreedit();
     ic_->updateUserInterface(UserInterfaceComponent::InputPanel);

@@ -138,12 +138,9 @@ static size_t probeWordLengthFromSurrounding(const SurroundingText &st) {
 } // namespace
 
 void UnikeyState::rebuildFromSurroundingText() {
-    FCITX_UNIKEY_DEBUG() << "[rebuildFromSurroundingText] Called, flag=" << mayRebuildStateFromSurroundingText_;
-
     if (mayRebuildStateFromSurroundingText_) {
         mayRebuildStateFromSurroundingText_ = false;
     } else {
-        FCITX_UNIKEY_DEBUG() << "[rebuildFromSurroundingText] Flag not set, returning";
         return;
     }
 
@@ -185,15 +182,11 @@ void UnikeyState::rebuildFromSurroundingText() {
     const auto &text = ic_->surroundingText().text();
     auto cursor = ic_->surroundingText().cursor();
     auto length = utf8::lengthValidated(text);
-    FCITX_UNIKEY_DEBUG() << "[rebuildFromSurroundingText] Text: \"" << text
-                         << "\" cursor: " << cursor << " length: " << length;
 
     if (length == utf8::INVALID_LENGTH) {
-        FCITX_UNIKEY_DEBUG() << "[rebuildFromSurroundingText] Invalid UTF8 length";
         return;
     }
     if (cursor <= 0 || cursor > length) {
-        FCITX_UNIKEY_DEBUG() << "[rebuildFromSurroundingText] Cursor out of range";
         return;
     }
 
@@ -202,7 +195,6 @@ void UnikeyState::rebuildFromSurroundingText() {
     auto end = utf8::getNextChar(start, text.end(), &lastCharBeforeCursor);
     if (lastCharBeforeCursor == utf8::INVALID_CHAR ||
         lastCharBeforeCursor == utf8::NOT_ENOUGH_SPACE) {
-        FCITX_UNIKEY_DEBUG() << "[rebuildFromSurroundingText] Invalid char before cursor";
         return;
     }
 
@@ -212,7 +204,6 @@ void UnikeyState::rebuildFromSurroundingText() {
 
     if (std::distance(start, end) != 1 ||
         !isValidStateCharacter(lastCharBeforeCursor)) {
-        FCITX_UNIKEY_DEBUG() << "[rebuildFromSurroundingText] Last char not valid for auto commit";
         return;
     }
 
@@ -265,14 +256,12 @@ size_t UnikeyState::rebuildStateFromSurrounding(bool deleteSurrounding) {
     // rebuilding would corrupt surrounding text.
     if (ic_->surroundingText().isValid() &&
         !ic_->surroundingText().selectedText().empty()) {
-        FCITX_UNIKEY_DEBUG() << "[rebuildStateFromSurrounding] Text selected, skipping rebuild";
         return 0;
     }
 
     if (!ic_->surroundingText().isValid()) {
         // If surrounding text is unavailable, skip rebuild to avoid corrupting
         // text.
-        FCITX_UNIKEY_DEBUG() << "[rebuildStateFromSurrounding] Surrounding text invalid";
         return 0;
     }
 
@@ -282,8 +271,6 @@ size_t UnikeyState::rebuildStateFromSurrounding(bool deleteSurrounding) {
     auto cursor = ic_->surroundingText().cursor();
     std::cerr << "[rebuildStateFromSurrounding] Text: \"" << text << "\" cursor: " << cursor << " lastImmediateWord: \"" << lastImmediateWord_ << "\"" << std::endl;
     auto length = utf8::lengthValidated(text);
-    FCITX_UNIKEY_DEBUG() << "[rebuildStateFromSurrounding] Text: \"" << text
-                         << "\" cursor: " << cursor << " length: " << length;
 
     // If we have a recent immediate-commit word but the app reports completely
     // empty surrounding text, it is very likely a stale snapshot (observed in
@@ -298,11 +285,9 @@ size_t UnikeyState::rebuildStateFromSurrounding(bool deleteSurrounding) {
     }
 
     if (length == utf8::INVALID_LENGTH) {
-        FCITX_UNIKEY_DEBUG() << "[rebuildStateFromSurrounding] Invalid UTF8 length";
         return 0;
     }
     if (cursor > length) {
-        FCITX_UNIKEY_DEBUG() << "[rebuildStateFromSurrounding] Cursor beyond text length";
         return 0;
     }
 
@@ -430,14 +415,8 @@ size_t UnikeyState::rebuildStateFromSurrounding(bool deleteSurrounding) {
 }
 
 size_t UnikeyState::rebuildStateFromLastImmediateWord(bool deleteSurrounding, KeySym upcomingSym) {
-    FCITX_UNIKEY_DEBUG()
-        << "[rebuildStateFromLastImmediateWord] Called deleteSurrounding="
-        << deleteSurrounding << " upcomingSym=" << upcomingSym;
-
     if (lastImmediateWord_.empty() || lastImmediateWordCharCount_ == 0 ||
         lastImmediateWordCharCount_ > MAX_LENGTH_VNWORD) {
-        FCITX_UNIKEY_DEBUG()
-            << "[rebuildStateFromLastImmediateWord] No lastImmediateWord";
         return 0;
     }
 
@@ -451,14 +430,10 @@ size_t UnikeyState::rebuildStateFromLastImmediateWord(bool deleteSurrounding, Ke
         uint32_t unicode = 0;
         auto next = utf8::getNextChar(it, end, &unicode);
         if (unicode == utf8::INVALID_CHAR || unicode == utf8::NOT_ENOUGH_SPACE) {
-            FCITX_UNIKEY_DEBUG()
-                << "[rebuildStateFromLastImmediateWord] Invalid UTF-8";
             return 0;
         }
         RebuildItem item;
         if (!isRebuildableUnicode(unicode, item)) {
-            FCITX_UNIKEY_DEBUG()
-                << "[rebuildStateFromLastImmediateWord] Word contains non-rebuildable char";
             return 0;
         }
         items.push_back(item);
