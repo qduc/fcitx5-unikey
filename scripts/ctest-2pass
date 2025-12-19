@@ -1,9 +1,0 @@
-#!/usr/bin/env bash
-set -euo pipefail
-
-# Thin wrapper so you can run:
-#   ./scripts/ctest-2pass --build-dir build -- -j8
-# without remembering the python path.
-
-SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
-exec python3 "$SCRIPT_DIR/ctest_2pass.py" "$@"

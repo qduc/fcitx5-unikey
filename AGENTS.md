@@ -7,87 +7,63 @@
 ```bash
 mkdir build && cd build
 cmake ..
-make
-ctest                    # Run tests
+make -j$(nproc)
+ctest                    # Run all tests
 ```
 
 CMake options: `ENABLE_QT` (default: On), `ENABLE_TEST` (default: On), `ENABLE_COVERAGE` (default: Off)
 
-Testing helper: the project includes a small 2-pass test runner that makes
-debugging failing integration tests easier. It lives at `scripts/ctest_2pass.py`
-and will automatically rerun failing test binaries with verbose output, and
-—when possible — detect and rerun only a failing "case" within a test binary
-(the test binaries expose `--list-cases` and `--case N`).
+### Testing Workflow
 
-Quick workflow
-1. Build and run tests:
-
+**Quick test workflow:**
 ```bash
-mkdir build && cd build
-cmake ..
-make -j$(nproc)
-# Run quick quiet pass and then verbose per-test reruns. Extra args after "--"
-# are forwarded to ctest (e.g. parallelism).
-python3 ../scripts/ctest_2pass.py --build-dir "$PWD" -- -j1
+# From anywhere in the project - just run:
+scripts/test.sh           # Brief summary mode (recommended)
+scripts/test.sh -v        # Verbose mode (show all output)
 ```
 
-2. Inspect per-test logs saved under the build dir:
+This automatically:
+- Detects build directory (current dir or ./build)
+- Runs tests with output on failure
+- Reruns specific failing cases for easier debugging
+- Saves detailed logs to `build/.test-logs/` (won't flood your terminal!)
+- Shows just the failure summary + a copy-paste command to rerun with full logs
 
-```
-build/.ctest-2pass/pass1.log                 # PASS 1 (ctest -Q) output
-build/.ctest-2pass/pass2.<testname>.log      # PASS 2 verbose rerun for a test
-build/.ctest-2pass/pass2.<testname>.caseN.log # Case-only rerun (when detected)
-```
-
-Listing and running individual cases
-
-Some integration test binaries include many numbered "cases" (small
-scenarios) inside a single executable. Two updated test binaries in this
-repository support convenient selection:
-
-- `build/bin/testsurroundingtext --list-cases` — list available case IDs.
-- `build/bin/testsurroundingtext --case 12` — run only case 12.
-
-Same for `testkeyhandling`:
-
-- `build/bin/testkeyhandling --list-cases`
-- `build/bin/testkeyhandling --case 5`
-
-This is useful for quickly reproducing and debugging a single failing
-scenario without rerunning the entire suite.
-
-How the 2-pass runner uses cases
-
-- PASS 1: runs `ctest -Q` to quickly discover failing tests.
-- PASS 2: reruns each failing test with `ctest -R <name> -VV --output-on-failure`.
-	- If the test binary prints a marker like `testname: Case N`, the runner
-		will detect the last such marker and automatically rerun the test binary
-		directly with `--case N`, saving a dedicated per-case log. This produces
-		a much smaller, focused log for debugging.
-- To skip the automated case-only rerun, pass `--no-case-pass` to the runner.
-
-Troubleshooting
-
-- If `ctest_2pass.py` cannot find the build dir, ensure you ran `cmake ..` in
-	that directory and are passing `--build-dir` correctly.
-- If a case-only rerun is not produced, the binary may not print the
-	`testname: Case N` marker (or the failing run aborted before printing it).
-	You can manually list cases and invoke `--case N`.
-- Per-case logs and PASS 2 full logs are stored under `build/.ctest-2pass/`.
-
-Example: reproduce one failing case locally
-
+**Example workflow when a test fails:**
 ```bash
-# show cases
-build/bin/testsurroundingtext --list-cases
+$ scripts/test.sh
+# Shows: "To rerun a specific failing case with full output:"
+#        ./bin/testsurroundingtext --case 1
 
-# run just case 20 for fast debugging
-build/bin/testsurroundingtext --case 20
+$ cd build
+$ ./bin/testsurroundingtext --case 1   # Full debug output!
 ```
 
-If you want to use the original behavior (no per-case detection), just run
-`ctest -VV --output-on-failure` from the build dir or pass
-`--no-case-pass` to `scripts/ctest_2pass.py`.
+**Manual testing:**
+```bash
+# From build directory
+make -j$(nproc)           # Rebuilds only changed files
+
+# Run all tests
+ctest
+
+# Run specific test case
+./bin/testsurroundingtext --case 21
+
+# List all test cases
+./bin/testsurroundingtext --list-cases
+```
+
+**Note:** Don't try `make testsurroundingtext` - there are no individual test targets. Just use `make -j$(nproc)` which rebuilds only what changed.
+
+### Advanced: 2-Pass Test Runner
+
+For detailed logging and advanced debugging, use `scripts/ctest_2pass.sh`:
+```bash
+bash scripts/ctest_2pass.sh --build-dir build -- -j1
+```
+
+This creates detailed logs in `build/.ctest-2pass/` with verbose output from each failing test.
 
 ## Architecture
 
