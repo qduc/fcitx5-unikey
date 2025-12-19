@@ -449,6 +449,11 @@ void UnikeyState::preedit(KeyEvent &keyEvent, bool allowImmediateCommitForThisKe
         if (!preeditStr_.empty()) {
             if (preeditStr_.back() == sym && isWordBreakSym(sym)) {
                 FCITX_UNIKEY_DEBUG() << "[preedit] Word break symbol detected, committing \"" << preeditStr_ << "\"";
+                // If we are in modifySurroundingText mode (even if immediateCommit is disabled),
+                // we should record this word to help detect stale surrounding text (e.g. in Firefox).
+                if (*this->engine_->config().modifySurroundingText) {
+                    recordNextCommitAsImmediateWord_ = true;
+                }
                 commit();
                 keyEvent.filterAndAccept();
                 return;
@@ -478,13 +483,26 @@ void UnikeyState::handleIgnoredKey() {
 void UnikeyState::commit() {
     if (recordNextCommitAsImmediateWord_) {
         recordNextCommitAsImmediateWord_ = false;
+
+        // Strip trailing word break symbols (e.g. space) to extract the actual word.
+        // The surrounding text checking logic expects the "word" part to match.
+        std::string candidate = preeditStr_;
+        while (!candidate.empty()) {
+            unsigned char last = static_cast<unsigned char>(candidate.back());
+            if (last < 0x80 && isWordBreakSym(last)) {
+                candidate.pop_back();
+            } else {
+                break;
+            }
+        }
+
         // Only keep a safe "word" as rewrite source.
         // - Must be valid UTF-8
         // - Must not contain word-break symbols (ASCII)
-        auto charLen = utf8::lengthValidated(preeditStr_);
+        auto charLen = utf8::lengthValidated(candidate);
         bool ok = (charLen != utf8::INVALID_LENGTH);
-        if (ok && !preeditStr_.empty()) {
-            for (const auto &c : preeditStr_) {
+        if (ok && !candidate.empty()) {
+            for (const auto &c : candidate) {
                 // Non-ASCII bytes are allowed (Vietnamese letters).
                 if (static_cast<unsigned char>(c) < 0x80) {
                     if (isWordBreakSym(static_cast<unsigned char>(c))) {
@@ -494,15 +512,15 @@ void UnikeyState::commit() {
                 }
             }
         }
-        if (ok && !preeditStr_.empty()) {
-            lastImmediateWord_ = preeditStr_;
+        if (ok && !candidate.empty()) {
+            lastImmediateWord_ = candidate;
             lastImmediateWordCharCount_ = static_cast<size_t>(charLen);
             std::cerr << "[commit] Recorded last immediate word: \"" << lastImmediateWord_
                 << "\" chars=" << lastImmediateWordCharCount_ << std::endl;
         } else {
             lastImmediateWord_.clear();
             lastImmediateWordCharCount_ = 0;
-            std::cerr << "[commit] Not recording immediate word (not a safe word)" << std::endl;
+            std::cerr << "[commit] Not recording immediate word (empty or unsafe)" << std::endl;
         }
     }
 

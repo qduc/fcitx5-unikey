@@ -61,6 +61,7 @@ void printCases() {
     std::cout << " 19: Rapid keystrokes with stale surrounding\n";
     std::cout << " 20: Backspace clears immediate word history\n";
     std::cout << " 21: ModifySurroundingText rebuilds preedit when cursor moves back\n";
+    std::cout << " 22: Control characters (newline, tab) are rejected from rebuild\n";
 }
 
 void announceCase(int id) {
@@ -700,6 +701,102 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             // When we type another character or space, it should commit
             testfrontend->call<ITestFrontend::pushCommitExpectation>("cá ");
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
+        }
+
+        // --- Case 22: Control characters (newline, tab) should NOT be rebuilt from surrounding ---
+        if (shouldRunCase(selCopy, 22)) {
+            announceCase(22);
+            FCITX_INFO() << "testsurroundingtext: Case 22 - Control characters rejected from rebuild";
+            RawConfig cfg = base;
+            cfg.setValueByPath("ImmediateCommit", "True");
+            cfg.setValueByPath("ModifySurroundingText", "False");
+            configureUnikey(unikey, cfg);
+
+            ic->reset();
+            // Surrounding text contains a newline before cursor
+            ic->surroundingText().setText("\n", 1, 1);
+            ic->updateSurroundingText();
+
+            // Type 'c' - should NOT include the newline in rebuild
+            // Expected: just commit 'c', not '\nc'
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("c");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("c"), false);
+
+            // Similarly test tab character
+            ic->reset();
+            ic->surroundingText().setText("\t", 1, 1);
+            ic->updateSurroundingText();
+
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("a");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
+        }
+
+        // --- Case 23: Firefox Stale Surrounding (abc vs 1) ---
+        // Verifies fallback to lastImmediateWord when unsupported app (Firefox)
+        // returns stale surrouding text that fails to match the last committed word.
+        if (shouldRunCase(selCopy, 23)) {
+            announceCase(23);
+            FCITX_INFO() << "testsurroundingtext: Case 23 - Firefox Stale Surrounding (abc vs 1)";
+
+            // Create a specific context simulating Firefox
+            auto uuidFirefox = testfrontend->call<ITestFrontend::createInputContext>("firefox");
+            auto *icFirefox = instance->inputContextManager().findByUUID(uuidFirefox);
+            FCITX_ASSERT(icFirefox);
+            icFirefox->setCapabilityFlags(CapabilityFlag::SurroundingText);
+
+            RawConfig cfg = base;
+            cfg.setValueByPath("ImmediateCommit", "False"); // Default for Firefox
+            cfg.setValueByPath("ModifySurroundingText", "True");
+            configureUnikey(unikey, cfg);
+
+            icFirefox->reset();
+            icFirefox->surroundingText().setText("", 0, 0);
+            icFirefox->updateSurroundingText();
+
+            // Toggle Unikey ON for this context
+            testfrontend->call<ITestFrontend::keyEvent>(uuidFirefox, Key("Control+space"), false);
+
+            // 1. Type "abc "
+            testfrontend->call<ITestFrontend::keyEvent>(uuidFirefox, Key("a"), false);
+            testfrontend->call<ITestFrontend::keyEvent>(uuidFirefox, Key("b"), false);
+            testfrontend->call<ITestFrontend::keyEvent>(uuidFirefox, Key("c"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("abc "); // Space triggers commit
+            testfrontend->call<ITestFrontend::keyEvent>(uuidFirefox, Key("space"), false);
+
+            // 2. Backspace (handled by app). Text becomes "abc".
+            // To simulate "1" being typed as a separate word (not merged),
+            // we should have a space separator or similar.
+            // In the bug report, user typed "abc ", then backspace.
+            // If backspace removed space, then "abc" is left.
+            // But if "1" was typed and NOT merged, it implies "abc" wasn't seen as rebuildable prefix.
+            // Maybe because it was stale empty?
+            // Let's set it to "abc " (with space) to force separation in this test.
+            icFirefox->surroundingText().setText("abc ", 4, 4);
+            icFirefox->updateSurroundingText();
+
+            // 3. Type "1 ". Should commit "1 ".
+            // This commit should record "1" as lastImmediateWord_ (stripping space).
+            testfrontend->call<ITestFrontend::keyEvent>(uuidFirefox, Key("1"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("1 ");
+            testfrontend->call<ITestFrontend::keyEvent>(uuidFirefox, Key("space"), false);
+
+            // 4. Backspace (handled by app). Text becomes "abc1".
+            // BUT Firefox returns STALE text "abc".
+            // Note: Our fix expects "abc" to NOT match "1".
+            icFirefox->surroundingText().setText("abc", 3, 3);
+            icFirefox->updateSurroundingText();
+
+            // 5. Type "2".
+            // Unikey should detect mismatch (Surrounding "abc" vs Last "1").
+            // Fallback: Rebuild "1". Delete stale text -len("1") -> -1.
+            // Result preedit "12".
+            // Commit "12" by space.
+            // Note: Since we are mocking surrounding text as "abc",
+            // DeleteSurroundingText(-1, 1) + Commit("12 ") -> Output "abc" - 1 + "12 " = "ab12 ".
+            // But verify specifically that "12 " is what Unikey commits for the new part.
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("12 ");
+            testfrontend->call<ITestFrontend::keyEvent>(uuidFirefox, Key("2"), false);
+            testfrontend->call<ITestFrontend::keyEvent>(uuidFirefox, Key("space"), false);
         }
 
         instance->deactivate();

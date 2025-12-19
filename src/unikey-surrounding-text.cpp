@@ -32,7 +32,13 @@ struct RebuildItem {
     VnLexiName vn;
 };
 
-static bool isRebuildableAscii(unsigned char c) { return !isWordBreakSym(c); }
+static bool isRebuildableAscii(unsigned char c) {
+    // Reject control characters (0-31, 127) - they break words
+    if (c < 32 || c == 127) {
+        return false;
+    }
+    return !isWordBreakSym(c);
+}
 
 static bool isRebuildableUnicode(uint32_t unicode, RebuildItem &out) {
     if (unicode < 0x80) {
@@ -78,6 +84,22 @@ static void replayItemsToEngine(UnikeyInputContext &uic,
         itemCount++;
     }
     std::cerr << "[rebuild] Replayed " << itemCount << " items" << std::endl;
+}
+
+// Build a UTF-8 string from collected rebuild items for logging and debugging.
+static std::string itemsToUtf8(const std::vector<RebuildItem> &items) {
+    std::string result;
+    result.reserve(items.size() * 3);
+    for (const auto &item : items) {
+        if (item.isAscii) {
+            result.push_back(static_cast<char>(item.ascii));
+        } else {
+            // Map VnLexiName -> Unicode code point then to UTF-8
+            auto codepoint = UnicodeTable[static_cast<int>(item.vn)];
+            result.append(utf8::UCS4ToUTF8(codepoint));
+        }
+    }
+    return result;
 }
 
 // Probe the last contiguous "word" before cursor, without mutating UnikeyState.
@@ -328,7 +350,8 @@ size_t UnikeyState::rebuildStateFromSurrounding(bool deleteSurrounding) {
     }
 
     const size_t wordLength = items.size();
-    std::cerr << "[rebuildStateFromSurrounding] Collected word length: " << wordLength << std::endl;
+    const std::string collectedWord = itemsToUtf8(items);
+    std::cerr << "[rebuildStateFromSurrounding] Collected word: \"" << collectedWord << "\" length: " << wordLength << std::endl;
 
     if (wordLength == 0 || wordLength > MAX_LENGTH_VNWORD) {
         std::cerr << "[rebuildStateFromSurrounding] Word length invalid, skipping" << std::endl;
@@ -384,6 +407,15 @@ size_t UnikeyState::rebuildStateFromSurrounding(bool deleteSurrounding) {
                     << wordUtf8 << "\", last=\"" << lastImmediateWord_
                     << "\"), accepting surrounding";
             } else {
+                if (isUnsupportedSurroundingApp()) {
+                    FCITX_UNIKEY_DEBUG()
+                        << "[rebuildStateFromSurrounding] Unsupported app (Firefox/LibreOffice) with mismatching surrounding (got=\""
+                        << wordUtf8 << "\", last=\"" << lastImmediateWord_
+                        << "\"), treating as stale";
+                    lastSurroundingRebuildWasStale_ = true;
+                    return 0;
+                }
+
                 // Otherwise, assume the user moved the cursor / changed context
                 // and the surrounding word is authoritative.
                 FCITX_UNIKEY_DEBUG()
