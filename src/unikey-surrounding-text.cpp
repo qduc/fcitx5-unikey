@@ -478,8 +478,13 @@ void UnikeyState::rebuildPreedit(KeySym upcomingSym) {
         return;
     }
 
-    if (isUnsupportedSurroundingApp()) {
-        std::cerr << "[rebuildPreedit] Disabled for unsupported app" << std::endl;
+    // For immediateCommit mode without modifySurroundingText, we need reliable
+    // surrounding text from the app. Skip for known problematic apps like Firefox.
+    // However, modifySurroundingText mode can work even with unreliable apps
+    // because it only rebuilds the preedit buffer from cursor position, not
+    // performing direct rewrites of committed text.
+    if (isUnsupportedSurroundingApp() && !*engine_->config().modifySurroundingText) {
+        std::cerr << "[rebuildPreedit] Disabled for unsupported app (immediateCommit mode only)" << std::endl;
         return;
     }
 

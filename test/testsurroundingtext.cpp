@@ -60,6 +60,7 @@ void printCases() {
     std::cout << " 18: Cursor at beginning of document\n";
     std::cout << " 19: Rapid keystrokes with stale surrounding\n";
     std::cout << " 20: Backspace clears immediate word history\n";
+    std::cout << " 21: ModifySurroundingText rebuilds preedit when cursor moves back\n";
 }
 
 void announceCase(int id) {
@@ -662,6 +663,43 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             ic->updateSurroundingText();
             testfrontend->call<ITestFrontend::pushCommitExpectation>("á");
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("1"), false);
+        }
+
+        // --- Case 21: ModifySurroundingText mode rebuilds preedit when cursor moves back ---
+        // This tests the scenario: type "ca ", move cursor back to "ca|", type "s" -> expect "cá" in preedit
+        if (shouldRunCase(selCopy, 21)) {
+            announceCase(21);
+            FCITX_INFO() << "testsurroundingtext: Case 21 - ModifySurroundingText rebuilds from cursor position";
+            RawConfig cfg = base;
+            cfg.setValueByPath("ImmediateCommit", "False");  // Use preedit mode
+            cfg.setValueByPath("ModifySurroundingText", "True");  // Enable rebuild
+            cfg.setValueByPath("InputMethod", "Telex");
+            configureUnikey(unikey, cfg);
+
+            ic->reset();
+            ic->surroundingText().setText("", 0, 0);
+            ic->updateSurroundingText();
+
+            // Type "ca" and space - should commit "ca " in preedit mode
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("c"), false);
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("ca ");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
+
+            // Simulate cursor moving back to position after "ca" (before space)
+            // Text is "ca ", cursor at position 2 (after "ca")
+            ic->surroundingText().setText("ca ", 2, 2);
+            ic->updateSurroundingText();
+
+            // Type "s" - should delete "ca" from surrounding, rebuild preedit with "ca",
+            // then process "s" -> "cás" which becomes "cá" with Telex
+            // Since we're in preedit mode, this will show as preedit, not immediate commit
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("s"), false);
+
+            // The preedit should now show "cá" (not yet committed)
+            // When we type another character or space, it should commit
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("cá ");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
         }
 
         instance->deactivate();
