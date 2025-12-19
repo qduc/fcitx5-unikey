@@ -67,29 +67,73 @@ This creates detailed logs in `build/.ctest-2pass/` with verbose output from eac
 
 ## Architecture
 
+### Core Components
+
 **UnikeyEngine** (`src/unikey-im.{h,cpp}`)
 - Main Fcitx5 `InputMethodEngine` implementation
-- Creates `UnikeyState` instances per input context
+- Creates `UnikeyState` instances per input context (Factory pattern)
+- Manages global configuration and UI actions
+- Provides keyEvent routing, input method switching, and addon lifecycle
 
 **UnikeyState** (`src/unikey-state.{h,cpp}`)
-- Per-context state managing preedit, commits, and surrounding text
-- Supports "Immediate Commit Mode" for apps with poor preedit support
+- Per-context state managing preedit composition, commits, and keystroke history
+- Owns `UnikeyInputContext` instance for Vietnamese processing
+- Implements "Immediate Commit Mode" for apps with limited preedit support
+- Tracks surrounding text reliability with failure thresholds and recovery counters
+- Maintains last committed word fallback for unreliable apps
 
-**Unikey Library** (`unikey/` directory)
+**Surrounding Text Handler** (`src/unikey-surrounding-text.cpp`)
+- Rebuilds Vietnamese composition state from existing text in input field
+- Critical for immediate commit mode in Firefox, Chromium, etc.
+- Implements reliability detection (2 failures → unreliable, 3 successes → recover)
+- Provides fallback mechanisms when apps return empty/stale surrounding text
+
+**Unikey Library** (`unikey/` directory - WARNING: don't touch this)
 - Upstream Unikey engine for Vietnamese input processing
-- Key files: `ukengine.cpp`, `unikeyinputcontext.{h,cpp}`
+- **Core**: `ukengine.cpp` - main Vietnamese composition engine
+- **Adapter**: `unikeyinputcontext.{h,cpp}` - wraps UkEngine for Fcitx5
+- **Input methods**: `inputproc.{h,cpp}` - Telex, VNI, VIQR mappers
+- **Charset support**: `charset.cpp`, `vnconv.h` - 8 output character sets
+- **Features**: `mactab.{h,cpp}` (macros), `usrkeymap.{h,cpp}` (custom keymaps)
 
 **Configuration** (`src/unikey-config.h`)
-- Input methods, charsets, and options (spell check, macro, immediate commit, etc.)
+- 13 options: input method, charset, spell check, macro, immediate commit, etc.
+- Supports 5 input methods (Telex, VNI, VIQR, SimpleTelex variants)
+- Supports 8 output charsets (UTF-8, TCVN3, VNI Win, VIQR, etc.)
+
+**UI Components**
+- **Macro Editor** (`macro-editor/` - Qt6-based) - manage Vietnamese macros
+- **Keymap Editor** (`keymap-editor/` - Qt6-based) - customize keyboard mappings
+- Launched via Fcitx5 ExternalOption from engine UI actions
 
 ## Code Layout
 
 ```
-src/                     - Fcitx5 integration layer
-unikey/                  - Core Vietnamese input engine (upstream)
-test/testunikey.cpp      - Integration tests using Fcitx5::TestFrontend
-macro-editor/            - Qt macro editor
-keymap-editor/           - Qt keymap editor
+src/                                    - Fcitx5 integration layer
+  ├── unikey-im.{h,cpp}                 - InputMethodEngine implementation
+  ├── unikey-state.{h,cpp}              - Per-context composition state
+  ├── unikey-surrounding-text.cpp       - Surrounding text rebuild & reliability
+  ├── unikey-config.h                   - Configuration options
+  └── unikey-{utils,constants,log}.h    - Utilities and helpers
+
+unikey/                                 - Core Vietnamese input engine (upstream Unikey, don't touch it)
+  ├── ukengine.{h,cpp}                  - Main composition processor
+  ├── unikeyinputcontext.{h,cpp}        - Fcitx5 adapter
+  ├── inputproc.{h,cpp}                 - Input method mappers
+  ├── charset.{h,cpp}, vnconv.h         - Character set conversions
+  ├── mactab.{h,cpp}                    - Macro table management
+  └── usrkeymap.{h,cpp}                 - Custom keymap loading
+
+test/                                   - Integration tests
+  ├── testunikey.cpp                    - Input composition tests (Telex/VNI)
+  ├── testsurroundingtext.cpp           - Surrounding text sync & immediate commit
+  └── testkeyhandling.cpp               - Shift restoration, key filtering, preedit
+
+macro-editor/                           - Qt6 macro editor
+keymap-editor/                          - Qt6 keymap editor
+scripts/                                - Test automation scripts
+  ├── test.sh                           - Quick test runner with smart retry
+  └── ctest_2pass.sh                    - Advanced 2-pass test runner
 ```
 
 ## Key Concepts
