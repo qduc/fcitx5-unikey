@@ -497,6 +497,27 @@ size_t UnikeyState::rebuildStateFromLastImmediateWord(bool deleteSurrounding, Ke
     return items.size();
 }
 
+/**
+ * @brief Rebuilds the preedit string from surrounding text for Vietnamese input composition.
+ *
+ * This function attempts to reconstruct the current composing state by analyzing the surrounding text
+ * around the cursor. It's primarily used in immediate commit mode and modify surrounding text mode
+ * to handle cases where the input method needs to transform already-committed text (e.g., adding
+ * diacritics to Vietnamese words).
+ *
+ * The function handles various edge cases:
+ * - Unreliable surrounding text in problematic applications (e.g., Firefox, LibreOffice)
+ * - Stale surrounding snapshots after commits
+ * - Recovery mechanisms when surrounding text becomes reliable again
+ * - Fallback to last committed word when surrounding is unavailable
+ *
+ * @param upcomingSym The next key symbol that will be processed, used for special handling
+ *                   in VNI input method for tone/shape keys during unreliable mode.
+ *
+ * @note This function is critical for maintaining correct Vietnamese composition state
+ *       in applications that don't support proper preedit or have timing issues with
+ *       surrounding text updates.
+ */
 void UnikeyState::rebuildPreedit(KeySym upcomingSym) {
     std::cerr << "[rebuildPreedit] Called upcomingSym=" << upcomingSym << std::endl;
 

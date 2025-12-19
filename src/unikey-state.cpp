@@ -197,6 +197,27 @@ void UnikeyState::clearImmediateCommitHistory() {
     surroundingSuccessCount_ = 0;
 }
 
+/**
+ * Processes a key event for Vietnamese input method composition.
+ *
+ * This function handles the core logic for transforming keystrokes into Vietnamese text
+ * using various input methods (Telex, VNI, VIQR). It manages preedit state, handles
+ * special key combinations for restoration, and decides when to commit text to the
+ * input context.
+ *
+ * Key behaviors:
+ * - Shift+Shift: Restores previous keystrokes to allow editing
+ * - Shift+Space: Commits current composition with a space
+ * - BackSpace: Handles deletion, with special logic in immediate commit mode
+ * - Printable characters: Processes through the Unikey engine for Vietnamese transformation
+ * - Word breaks: Commits when encountering spaces or punctuation
+ * - Special handling for 'W' in Telex mode at word beginnings
+ *
+ * @param keyEvent The key event to process
+ * @param allowImmediateCommitForThisKey Whether immediate commit mode is allowed for this keystroke.
+ *        When true, commits each character immediately instead of maintaining preedit state.
+ *        This is used for applications with limited preedit support.
+ */
 void UnikeyState::preedit(KeyEvent &keyEvent, bool allowImmediateCommitForThisKey) {
     auto sym = keyEvent.rawKey().sym();
     auto state = keyEvent.rawKey().states();
@@ -439,7 +460,7 @@ void UnikeyState::preedit(KeyEvent &keyEvent, bool allowImmediateCommitForThisKe
             // Record this commit as the latest immediate-commit word if it
             // looks like a word (no spaces / breaks). This will be used as a
             // fallback rewrite source when surrounding text is stale/empty.
-            recordNextCommitAsImmediateWord_ = true;
+            // recordNextCommitAsImmediateWord_ = true;
             commit();
             keyEvent.filterAndAccept();
             return;
@@ -452,7 +473,7 @@ void UnikeyState::preedit(KeyEvent &keyEvent, bool allowImmediateCommitForThisKe
                 // If we are in modifySurroundingText mode (even if immediateCommit is disabled),
                 // we should record this word to help detect stale surrounding text (e.g. in Firefox).
                 if (*this->engine_->config().modifySurroundingText) {
-                    recordNextCommitAsImmediateWord_ = true;
+                    // recordNextCommitAsImmediateWord_ = true;
                 }
                 commit();
                 keyEvent.filterAndAccept();
