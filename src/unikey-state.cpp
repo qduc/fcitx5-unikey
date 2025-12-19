@@ -357,6 +357,7 @@ void UnikeyState::preedit(KeyEvent &keyEvent, bool allowImmediateCommitForThisKe
 
         if (preeditStr_.empty()) {
             commit();
+            keyEvent.filterAndAccept();
             return;
         }
 
