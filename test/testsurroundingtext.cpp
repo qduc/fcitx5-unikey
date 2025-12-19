@@ -114,7 +114,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
         // --- Case 1: Immediate commit rewrite from ASCII surrounding ---
         if (shouldRunCase(selCopy, 1)) {
             announceCase(1);
-            FCITX_INFO() << "testsurroundingtext: Case 1";
+            FCITX_INFO() << "testsurroundingtext: Case 1 - Immediate commit rewrite from ASCII surrounding";
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "True");
             cfg.setValueByPath("ModifySurroundingText", "False");
@@ -125,7 +125,6 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             ic->updateSurroundingText();
 
             testfrontend->call<ITestFrontend::pushCommitExpectation>("ngả");
-            FCITX_INFO() << "testsurroundingtext: Case 1 key r";
             // VNI: 3 = hỏi (ả).
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("3"), false);
         }
@@ -133,7 +132,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
         // --- Case 2: Unicode rebuild (Vietnamese char in surrounding) ---
         if (shouldRunCase(selCopy, 2)) {
             announceCase(2);
-            FCITX_INFO() << "testsurroundingtext: Case 2";
+            FCITX_INFO() << "testsurroundingtext: Case 2 - Unicode rebuild (Vietnamese char in surrounding)";
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "True");
             cfg.setValueByPath("ModifySurroundingText", "False");
@@ -144,7 +143,6 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             ic->updateSurroundingText();
 
             testfrontend->call<ITestFrontend::pushCommitExpectation>("ngá");
-            FCITX_INFO() << "testsurroundingtext: Case 2 key s";
             // VNI: 1 = sắc (á).
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("1"), false);
         }
@@ -152,7 +150,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
         // --- Case 3: Immediate commit with proper surrounding updates ---
         if (shouldRunCase(selCopy, 3)) {
             announceCase(3);
-            FCITX_INFO() << "testsurroundingtext: Case 3";
+            FCITX_INFO() << "testsurroundingtext: Case 3 - Immediate commit with proper surrounding updates";
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "True");
             cfg.setValueByPath("ModifySurroundingText", "False");
@@ -163,34 +161,30 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             ic->updateSurroundingText();
 
             testfrontend->call<ITestFrontend::pushCommitExpectation>("a");
-            FCITX_INFO() << "testsurroundingtext: Case 3 key a";
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
             ic->surroundingText().setText("a", 1, 1);
             ic->updateSurroundingText();
 
             testfrontend->call<ITestFrontend::pushCommitExpectation>("â");
-            FCITX_INFO() << "testsurroundingtext: Case 3 key a";
             // VNI: 6 adds circumflex (â).
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("6"), false);
             ic->surroundingText().setText("â", 1, 1);
             ic->updateSurroundingText();
 
             testfrontend->call<ITestFrontend::pushCommitExpectation>("ấ");
-            FCITX_INFO() << "testsurroundingtext: Case 3 key s";
             // VNI: 1 = sắc.
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("1"), false);
             ic->surroundingText().setText("ấ", 1, 1);
             ic->updateSurroundingText();
 
             testfrontend->call<ITestFrontend::pushCommitExpectation>("ấ ");
-            FCITX_INFO() << "testsurroundingtext: Case 3 key space";
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
         }
 
         // --- Case 4: Stale/empty surrounding fallback (Firefox-like) ---
         if (shouldRunCase(selCopy, 4)) {
             announceCase(4);
-            FCITX_INFO() << "testsurroundingtext: Case 4";
+            FCITX_INFO() << "testsurroundingtext: Case 4 - Stale/empty surrounding fallback (Firefox-like)";
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "True");
             cfg.setValueByPath("ModifySurroundingText", "False");
@@ -202,22 +196,19 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
 
             // No surrounding updates between key strokes.
             testfrontend->call<ITestFrontend::pushCommitExpectation>("a");
-            FCITX_INFO() << "testsurroundingtext: Case 4 key a";
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
 
             testfrontend->call<ITestFrontend::pushCommitExpectation>("â");
-            FCITX_INFO() << "testsurroundingtext: Case 4 key a";
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("6"), false);
 
             testfrontend->call<ITestFrontend::pushCommitExpectation>("ấ");
-            FCITX_INFO() << "testsurroundingtext: Case 4 key s";
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("1"), false);
         }
 
         // --- Case 5: Truncated surrounding word should use lastImmediateWord fallback ---
         if (shouldRunCase(selCopy, 5)) {
             announceCase(5);
-            FCITX_INFO() << "testsurroundingtext: Case 5";
+            FCITX_INFO() << "testsurroundingtext: Case 5 - Truncated surrounding word uses lastImmediateWord fallback";
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "True");
             cfg.setValueByPath("ModifySurroundingText", "False");
@@ -228,12 +219,10 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             ic->updateSurroundingText();
 
             testfrontend->call<ITestFrontend::pushCommitExpectation>("e");
-            FCITX_INFO() << "testsurroundingtext: Case 5 key e";
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("e"), false);
 
             // Use a neutral key that does not trigger Telex tone processing.
             testfrontend->call<ITestFrontend::pushCommitExpectation>("en");
-            FCITX_INFO() << "testsurroundingtext: Case 5 key n";
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("n"), false);
 
             // Stale snapshot only shows a prefix of the last committed word.
@@ -241,14 +230,13 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             ic->updateSurroundingText();
 
             testfrontend->call<ITestFrontend::pushCommitExpectation>("ena");
-            FCITX_INFO() << "testsurroundingtext: Case 5 key a";
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
         }
 
         // --- Case 6: Surrounding has extra prefix; trust surrounding for tone placement ---
         if (shouldRunCase(selCopy, 6)) {
             announceCase(6);
-            FCITX_INFO() << "testsurroundingtext: Case 6";
+            FCITX_INFO() << "testsurroundingtext: Case 6 - Surrounding has extra prefix; trust surrounding for tone";
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "True");
             cfg.setValueByPath("ModifySurroundingText", "False");
@@ -260,11 +248,9 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
 
             // Build lastImmediateWord = "ua".
             testfrontend->call<ITestFrontend::pushCommitExpectation>("u");
-            FCITX_INFO() << "testsurroundingtext: Case 6 key u";
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("u"), false);
 
             testfrontend->call<ITestFrontend::pushCommitExpectation>("ua");
-            FCITX_INFO() << "testsurroundingtext: Case 6 key a";
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
 
             // Now app reports a longer surrounding word: "qua".
@@ -272,14 +258,13 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             ic->updateSurroundingText();
 
             testfrontend->call<ITestFrontend::pushCommitExpectation>("quá");
-            FCITX_INFO() << "testsurroundingtext: Case 6 key s";
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("1"), false);
         }
 
         // --- Case 7: Active selection should skip rebuild/delete and just commit ---
         if (shouldRunCase(selCopy, 7)) {
             announceCase(7);
-            FCITX_INFO() << "testsurroundingtext: Case 7";
+            FCITX_INFO() << "testsurroundingtext: Case 7 - Active selection skips rebuild/delete and just commits";
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "True");
             cfg.setValueByPath("ModifySurroundingText", "False");
@@ -291,14 +276,13 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             ic->updateSurroundingText();
 
             testfrontend->call<ITestFrontend::pushCommitExpectation>("x");
-            FCITX_INFO() << "testsurroundingtext: Case 7 key x";
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("x"), false);
         }
 
         // --- Case 8: ModifySurroundingText with cursor==0 should not underflow/crash ---
         if (shouldRunCase(selCopy, 8)) {
             announceCase(8);
-            FCITX_INFO() << "testsurroundingtext: Case 8";
+            FCITX_INFO() << "testsurroundingtext: Case 8 - ModifySurroundingText with cursor==0 should not crash";
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "False");
             cfg.setValueByPath("ModifySurroundingText", "True");
@@ -309,10 +293,8 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             ic->updateSurroundingText();
 
             // In non-immediate mode, "a" should be committed on Return.
-            FCITX_INFO() << "testsurroundingtext: Case 8 key a";
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
             testfrontend->call<ITestFrontend::pushCommitExpectation>("a");
-            FCITX_INFO() << "testsurroundingtext: Case 8 key Return";
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("Return"), false);
         }
 
@@ -321,7 +303,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
         // immediate commit mode.
         if (shouldRunCase(selCopy, 9)) {
             announceCase(9);
-            FCITX_INFO() << "testsurroundingtext: Case 9";
+            FCITX_INFO() << "testsurroundingtext: Case 9 - Single failure should NOT mark surrounding unreliable";
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "True");
             cfg.setValueByPath("ModifySurroundingText", "False");
@@ -333,13 +315,11 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
 
             // First keystroke - immediate commit should work.
             testfrontend->call<ITestFrontend::pushCommitExpectation>("a");
-            FCITX_INFO() << "testsurroundingtext: Case 9 key a";
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
 
             // Surrounding stays empty (single stale failure).
             // Second keystroke - should still use fallback successfully.
             testfrontend->call<ITestFrontend::pushCommitExpectation>("â");
-            FCITX_INFO() << "testsurroundingtext: Case 9 key a";
             // VNI: 6 adds circumflex.
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("6"), false);
 
@@ -349,7 +329,6 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             ic->updateSurroundingText();
 
             testfrontend->call<ITestFrontend::pushCommitExpectation>("ấ");
-            FCITX_INFO() << "testsurroundingtext: Case 9 key s";
             // VNI: 1 = sắc.
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("1"), false);
         }
@@ -359,7 +338,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
         // any successful surrounding reads, the system should fall back to preedit.
         if (shouldRunCase(selCopy, 10)) {
             announceCase(10);
-            FCITX_INFO() << "testsurroundingtext: Case 10";
+            FCITX_INFO() << "testsurroundingtext: Case 10 - Multiple consecutive failures should mark as unreliable";
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "True");
             cfg.setValueByPath("ModifySurroundingText", "False");
@@ -371,17 +350,14 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
 
             // First commit - starts with empty surrounding.
             testfrontend->call<ITestFrontend::pushCommitExpectation>("t");
-            FCITX_INFO() << "testsurroundingtext: Case 10 key t";
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("t"), false);
 
             // Keep surrounding empty (failure 1).
             testfrontend->call<ITestFrontend::pushCommitExpectation>("to");
-            FCITX_INFO() << "testsurroundingtext: Case 10 key o";
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("o"), false);
 
             // Still empty (failure 2 - threshold reached).
             testfrontend->call<ITestFrontend::pushCommitExpectation>("toi");
-            FCITX_INFO() << "testsurroundingtext: Case 10 key i";
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("i"), false);
 
             // After threshold, the system should be in unreliable mode and
@@ -391,7 +367,6 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             // then we need Return or space to commit.
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("s"), false);
             testfrontend->call<ITestFrontend::pushCommitExpectation>("s");
-            FCITX_INFO() << "testsurroundingtext: Case 10 key Return";
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("Return"), false);
         }
 
@@ -400,7 +375,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
         // giving the new context a fresh start.
         if (shouldRunCase(selCopy, 11)) {
             announceCase(11);
-            FCITX_INFO() << "testsurroundingtext: Case 11";
+            FCITX_INFO() << "testsurroundingtext: Case 11 - Focus change (reset) clears unreliable state";
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "True");
             cfg.setValueByPath("ModifySurroundingText", "False");
@@ -412,15 +387,12 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             ic->updateSurroundingText();
 
             testfrontend->call<ITestFrontend::pushCommitExpectation>("x");
-            FCITX_INFO() << "testsurroundingtext: Case 11 key x";
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("x"), false);
 
             testfrontend->call<ITestFrontend::pushCommitExpectation>("xy");
-            FCITX_INFO() << "testsurroundingtext: Case 11 key y";
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("y"), false);
 
             testfrontend->call<ITestFrontend::pushCommitExpectation>("xyz");
-            FCITX_INFO() << "testsurroundingtext: Case 11 key z";
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("z"), false);
 
             // Now simulate focus change (triggers InputContextReset).
@@ -433,7 +405,6 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             ic->updateSurroundingText();
 
             testfrontend->call<ITestFrontend::pushCommitExpectation>("quá");
-            FCITX_INFO() << "testsurroundingtext: Case 11 key s";
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("1"), false);
         }
 
@@ -443,7 +414,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
         // restore immediate commit mode.
         if (shouldRunCase(selCopy, 12)) {
             announceCase(12);
-            FCITX_INFO() << "testsurroundingtext: Case 12";
+            FCITX_INFO() << "testsurroundingtext: Case 12 - Consecutive successes recover from unreliable";
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "True");
             cfg.setValueByPath("ModifySurroundingText", "False");
@@ -455,21 +426,17 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
 
             // Trigger failures to enter unreliable state.
             testfrontend->call<ITestFrontend::pushCommitExpectation>("m");
-            FCITX_INFO() << "testsurroundingtext: Case 12 key m";
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("m"), false);
 
             testfrontend->call<ITestFrontend::pushCommitExpectation>("ma");
-            FCITX_INFO() << "testsurroundingtext: Case 12 key a";
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
 
             testfrontend->call<ITestFrontend::pushCommitExpectation>("man");
-            FCITX_INFO() << "testsurroundingtext: Case 12 key n";
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("n"), false);
 
             // Now in preedit mode. Commit current preedit.
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("h"), false);
             testfrontend->call<ITestFrontend::pushCommitExpectation>("h");
-            FCITX_INFO() << "testsurroundingtext: Case 12 key Return";
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("Return"), false);
 
             // Now start providing valid surrounding text for recovery.
@@ -478,21 +445,18 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             ic->updateSurroundingText();
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("s"), false);
             testfrontend->call<ITestFrontend::pushCommitExpectation>("s");
-            FCITX_INFO() << "testsurroundingtext: Case 12 key Return";
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("Return"), false);
 
             ic->surroundingText().setText("ca", 2, 2);
             ic->updateSurroundingText();
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("s"), false);
             testfrontend->call<ITestFrontend::pushCommitExpectation>("s");
-            FCITX_INFO() << "testsurroundingtext: Case 12 key Return";
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("Return"), false);
 
             ic->surroundingText().setText("da", 2, 2);
             ic->updateSurroundingText();
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("s"), false);
             testfrontend->call<ITestFrontend::pushCommitExpectation>("s");
-            FCITX_INFO() << "testsurroundingtext: Case 12 key Return";
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("Return"), false);
 
             // After 3 successes, immediate commit should be restored.
@@ -500,7 +464,6 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             ic->updateSurroundingText();
 
             testfrontend->call<ITestFrontend::pushCommitExpectation>("ngả");
-            FCITX_INFO() << "testsurroundingtext: Case 12 key r";
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("3"), false);
         }
 
@@ -513,7 +476,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
         // should be rebuilt and modified correctly.
         if (shouldRunCase(selCopy, 13)) {
             announceCase(13);
-            FCITX_INFO() << "testsurroundingtext: Case 13";
+            FCITX_INFO() << "testsurroundingtext: Case 13 - ModifySurroundingText with Vietnamese text present";
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "False");
             cfg.setValueByPath("ModifySurroundingText", "True");
@@ -525,7 +488,6 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             ic->updateSurroundingText();
 
             // Type 's' to add tone - should work with ModifySurroundingText
-            FCITX_INFO() << "testsurroundingtext: Case 13 key 1";
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("1"), false);
             testfrontend->call<ITestFrontend::pushCommitExpectation>("ngá");
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("Return"),
@@ -537,7 +499,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
         // behavior should apply.
         if (shouldRunCase(selCopy, 14)) {
             announceCase(14);
-            FCITX_INFO() << "testsurroundingtext: Case 14";
+            FCITX_INFO() << "testsurroundingtext: Case 14 - ImmediateCommit takes precedence over ModifySurroundingText";
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "True");
             cfg.setValueByPath("ModifySurroundingText", "True");
@@ -549,14 +511,12 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
 
             // Build a word with surrounding updates
             testfrontend->call<ITestFrontend::pushCommitExpectation>("a");
-            FCITX_INFO() << "testsurroundingtext: Case 14 key a";
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
             ic->surroundingText().setText("a", 1, 1);
             ic->updateSurroundingText();
 
             // Add circumflex - should work in immediate commit mode
             testfrontend->call<ITestFrontend::pushCommitExpectation>("â");
-            FCITX_INFO() << "testsurroundingtext: Case 14 key 6";
             // VNI: 6 adds circumflex
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("6"), false);
         }
@@ -565,7 +525,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
         // When cursor is right after a word boundary, no rebuild should occur.
         if (shouldRunCase(selCopy, 15)) {
             announceCase(15);
-            FCITX_INFO() << "testsurroundingtext: Case 15";
+            FCITX_INFO() << "testsurroundingtext: Case 15 - Cursor at word boundary: no rebuild";
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "True");
             cfg.setValueByPath("ModifySurroundingText", "False");
@@ -578,7 +538,6 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
 
             // Type 'a' - should just commit 'a' without rebuild
             testfrontend->call<ITestFrontend::pushCommitExpectation>("a");
-            FCITX_INFO() << "testsurroundingtext: Case 15 key a";
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
         }
 
@@ -586,7 +545,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
         // Ensure the rebuild logic handles long words correctly.
         if (shouldRunCase(selCopy, 16)) {
             announceCase(16);
-            FCITX_INFO() << "testsurroundingtext: Case 16";
+            FCITX_INFO() << "testsurroundingtext: Case 16 - Long word near MAX_LENGTH_VNWORD";
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "True");
             cfg.setValueByPath("ModifySurroundingText", "False");
@@ -600,7 +559,6 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             // Add tone - should rebuild and work correctly
             testfrontend->call<ITestFrontend::pushCommitExpectation>(
                 "nghiên");
-            FCITX_INFO() << "testsurroundingtext: Case 16 key 6";
             // VNI: 6 adds circumflex to 'e'
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("6"), false);
         }
@@ -609,7 +567,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
         // Ensure proper word boundary detection with mixed content.
         if (shouldRunCase(selCopy, 17)) {
             announceCase(17);
-            FCITX_INFO() << "testsurroundingtext: Case 17";
+            FCITX_INFO() << "testsurroundingtext: Case 17 - Mixed ASCII + Vietnamese in surrounding";
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "True");
             cfg.setValueByPath("ModifySurroundingText", "False");
@@ -622,7 +580,6 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
 
             // Add tone to "toi" -> "tôi"
             testfrontend->call<ITestFrontend::pushCommitExpectation>("tôi");
-            FCITX_INFO() << "testsurroundingtext: Case 17 key 6";
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("6"), false);
         }
 
@@ -630,7 +587,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
         // Ensure no underflow when cursor is at position 0.
         if (shouldRunCase(selCopy, 18)) {
             announceCase(18);
-            FCITX_INFO() << "testsurroundingtext: Case 18";
+            FCITX_INFO() << "testsurroundingtext: Case 18 - Cursor at beginning of document";
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "True");
             cfg.setValueByPath("ModifySurroundingText", "False");
@@ -644,7 +601,6 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             // Should just commit 'a' without trying to access text before
             // cursor
             testfrontend->call<ITestFrontend::pushCommitExpectation>("a");
-            FCITX_INFO() << "testsurroundingtext: Case 18 key a";
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
         }
 
@@ -652,7 +608,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
         // Simulating fast typing where surrounding text can't keep up.
         if (shouldRunCase(selCopy, 19)) {
             announceCase(19);
-            FCITX_INFO() << "testsurroundingtext: Case 19";
+            FCITX_INFO() << "testsurroundingtext: Case 19 - Rapid keystrokes with stale surrounding";
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "True");
             cfg.setValueByPath("ModifySurroundingText", "False");
@@ -664,20 +620,16 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
 
             // Rapid typing: "toi6" without surrounding updates
             testfrontend->call<ITestFrontend::pushCommitExpectation>("t");
-            FCITX_INFO() << "testsurroundingtext: Case 19 key t";
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("t"), false);
 
             testfrontend->call<ITestFrontend::pushCommitExpectation>("to");
-            FCITX_INFO() << "testsurroundingtext: Case 19 key o";
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("o"), false);
 
             testfrontend->call<ITestFrontend::pushCommitExpectation>("toi");
-            FCITX_INFO() << "testsurroundingtext: Case 19 key i";
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("i"), false);
 
             // Add circumflex - using fallback since no surrounding updates
             testfrontend->call<ITestFrontend::pushCommitExpectation>("tôi");
-            FCITX_INFO() << "testsurroundingtext: Case 19 key 6";
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("6"), false);
         }
 
@@ -685,7 +637,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
         // After explicit deletion, immediate word tracking should be cleared.
         if (shouldRunCase(selCopy, 20)) {
             announceCase(20);
-            FCITX_INFO() << "testsurroundingtext: Case 20";
+            FCITX_INFO() << "testsurroundingtext: Case 20 - Backspace clears immediate word history";
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "True");
             cfg.setValueByPath("ModifySurroundingText", "False");
@@ -697,13 +649,11 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
 
             // Type 'b'
             testfrontend->call<ITestFrontend::pushCommitExpectation>("ab");
-            FCITX_INFO() << "testsurroundingtext: Case 20 key b";
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("b"), false);
 
             // Now backspace
             ic->surroundingText().setText("ab", 2, 2);
             ic->updateSurroundingText();
-            FCITX_INFO() << "testsurroundingtext: Case 20 key BackSpace";
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("BackSpace"),
                                                         false);
 
@@ -711,7 +661,6 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             ic->surroundingText().setText("a", 1, 1);
             ic->updateSurroundingText();
             testfrontend->call<ITestFrontend::pushCommitExpectation>("á");
-            FCITX_INFO() << "testsurroundingtext: Case 20 key 1";
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("1"), false);
         }
 
@@ -749,7 +698,7 @@ int main(int argc, char **argv) {
 
     // Keep some logs available when debugging locally; avoid excessive output
     // in CI.
-    fcitx::Log::setLogRule("default=3,unikey=3");
+    fcitx::Log::setLogRule("default=3,unikey=5");
 
     if (sel.listCases) {
         printCases();

@@ -58,6 +58,7 @@ void printCases() {
     std::cout << " 11: W at word beginning (process_w_at_begin=True)\n";
     std::cout << " 12: Multiple tone changes\n";
     std::cout << " 13: Double-typing to undo tone\n";
+    std::cout << " 14: Backspace should not delete from app when preedit is not empty\n";
 }
 
 void announceCase(int id) {
@@ -426,6 +427,29 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
         }
 
+        // --- Test: Backspace should not delete from app when preedit is not empty ---
+        if (shouldRunCase(selCopy, 14)) {
+            announceCase(14);
+            FCITX_INFO() << "testkeyhandling: Case 14 - Backspace should not delete from app when preedit is not empty";
+            config.setValueByPath("ImmediateCommit", "False");
+            config.setValueByPath("InputMethod", "Telex");
+            unikey->setConfig(config);
+
+            ic->reset();
+            ic->surroundingText().setText("example", 7, 7);
+            ic->updateSurroundingText();
+
+            // Type "1" -> in preedit
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("1"), false);
+
+            // Backspace should clear preedit and be FILTERED (not pass through to app)
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("BackSpace"), false);
+
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("a ");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
+        }
+
         instance->deactivate();
         dispatcher->schedule([dispatcher, instance]() {
             dispatcher->detach();
@@ -458,7 +482,7 @@ int main(int argc, char **argv) {
     char arg2[] = "--enable=testim,testfrontend,unikey";
     char *fcitxArgv[] = {arg0, arg1, arg2};
 
-    fcitx::Log::setLogRule("default=3,unikey=3");
+    fcitx::Log::setLogRule("default=3,unikey=5");
 
     if (sel.listCases) {
         printCases();
