@@ -170,8 +170,9 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             // Move cursor left once: "to|i".
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("Left"), false);
 
-            // Apply VNI 6 at the new cursor position: should rewrite "to" -> "tô".
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("tô");
+            // Apply VNI 6 at the new cursor position: should rewrite the whole
+            // segment "toi" -> "tôi".
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("tôi");
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("6"), false);
         }
 

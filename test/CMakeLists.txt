@@ -19,3 +19,8 @@ add_executable(testkeyhandling testkeyhandling.cpp)
 target_link_libraries(testkeyhandling Fcitx5::Core Fcitx5::Module::TestFrontend)
 add_dependencies(testkeyhandling unikey copy-addon copy-im)
 add_test(NAME testkeyhandling COMMAND testkeyhandling)
+
+add_executable(testinternalstate testinternalstate.cpp)
+target_link_libraries(testinternalstate Fcitx5::Core Fcitx5::Module::TestFrontend)
+add_dependencies(testinternalstate unikey copy-addon copy-im)
+add_test(NAME testinternalstate COMMAND testinternalstate)

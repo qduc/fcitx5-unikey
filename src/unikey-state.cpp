@@ -349,6 +349,7 @@ void UnikeyState::reset() {
     uic_.resetBuf();
     preeditStr_.clear();
     keyStrokes_.clear();
+    pendingRecommitSuffix_.clear();
     updatePreedit();
     lastShiftPressed_ = FcitxKey_None;
 }
@@ -720,9 +721,14 @@ void UnikeyState::handleIgnoredKey(KeySym sym, const KeyStates &state) {
 
 void UnikeyState::commit() {
     if (!preeditStr_.empty()) {
-        std::cerr << "[commit] Committing string: \"" << preeditStr_ << "\"" << std::endl;
-        internal_.insertText(preeditStr_);
-        ic_->commitString(preeditStr_);
+        std::string commitStr = preeditStr_;
+        if (!pendingRecommitSuffix_.empty()) {
+            commitStr += pendingRecommitSuffix_;
+        }
+        std::cerr << "[commit] Committing string: \"" << commitStr << "\"" << std::endl;
+        internal_.insertText(commitStr);
+        ic_->commitString(commitStr);
+        pendingRecommitSuffix_.clear();
     } else {
         std::cerr << "[commit] Preedit is empty, nothing to commit" << std::endl;
     }

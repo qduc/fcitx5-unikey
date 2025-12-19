@@ -107,6 +107,13 @@ private:
     bool autoCommit_ = false;
     KeySym lastShiftPressed_ = FcitxKey_None;
 
+    // When we rebuild a word segment that spans across the cursor (i.e. there
+    // is text after the cursor inside the same word), we delete the *entire*
+    // segment and then re-commit the updated left part plus this suffix as a
+    // single commitString(). This makes mid-word insertion behave like an
+    // actual in-buffer insertion (e.g. ab|c + x => abxc).
+    std::string pendingRecommitSuffix_;
+
     InternalTextState internal_;
 };
 

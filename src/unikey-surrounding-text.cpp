@@ -156,6 +156,104 @@ static InternalWord collectWordBeforeCursor(const std::string &text, size_t curs
     return out;
 }
 
+struct InternalSegment {
+    std::vector<RebuildItem> items; // [start, end)
+    size_t startCharacter = 0;
+    size_t endCharacter = 0;
+    size_t cursorInSegment = 0; // code points from startCharacter
+    std::string suffixUtf8;     // original text [cursor, end)
+    std::string_view utf8Slice; // [start, end)
+};
+
+static InternalSegment collectSegmentAroundCursor(const std::string &text,
+                                                  size_t cursor) {
+    InternalSegment out;
+    auto length = utf8::lengthValidated(text);
+    if (length == utf8::INVALID_LENGTH) {
+        return out;
+    }
+    const size_t len = static_cast<size_t>(length);
+    if (cursor > len) {
+        return out;
+    }
+
+    auto cursorIt = utf8::nextNChar(text.begin(), cursor);
+
+    // Scan left.
+    size_t start = cursor;
+    while (start > 0) {
+        auto it = utf8::nextNChar(text.begin(), start);
+        const uint32_t ch = utf8::getLastChar(text.begin(), it);
+        RebuildItem dummy;
+        if (!isRebuildableUnicode(ch, dummy)) {
+            break;
+        }
+        start -= 1;
+    }
+
+    // Scan right.
+    size_t end = cursor;
+    auto it = cursorIt;
+    while (end < len) {
+        uint32_t ch = 0;
+        auto next = utf8::getNextChar(it, text.end(), &ch);
+        if (ch == utf8::INVALID_CHAR || ch == utf8::NOT_ENOUGH_SPACE) {
+            return InternalSegment{};
+        }
+        RebuildItem dummy;
+        if (!isRebuildableUnicode(ch, dummy)) {
+            break;
+        }
+        end += 1;
+        it = next;
+    }
+
+    if (start == end) {
+        return out;
+    }
+
+    const size_t segLen = end - start;
+    if (segLen == 0 || segLen > MAX_LENGTH_VNWORD) {
+        return out;
+    }
+
+    auto startIt = utf8::nextNChar(text.begin(), start);
+    auto endIt = utf8::nextNChar(startIt, segLen);
+    auto cursorIt2 = utf8::nextNChar(text.begin(), cursor);
+
+    // Build items.
+    std::vector<RebuildItem> items;
+    items.reserve(segLen);
+    auto iter = startIt;
+    while (iter != endIt) {
+        uint32_t ch = 0;
+        auto next = utf8::getNextChar(iter, endIt, &ch);
+        if (ch == utf8::INVALID_CHAR || ch == utf8::NOT_ENOUGH_SPACE) {
+            return InternalSegment{};
+        }
+        RebuildItem item;
+        if (!isRebuildableUnicode(ch, item)) {
+            // Should not happen due to scanning, but keep safe.
+            return InternalSegment{};
+        }
+        items.push_back(item);
+        iter = next;
+    }
+
+    out.items = std::move(items);
+    out.startCharacter = start;
+    out.endCharacter = end;
+    out.cursorInSegment = cursor - start;
+    out.utf8Slice = std::string_view(&*startIt, std::distance(startIt, endIt));
+
+    // Capture suffix [cursor, end) from original text.
+    if (cursor < end) {
+        out.suffixUtf8.assign(cursorIt2, endIt);
+    }
+
+    return out;
+}
+
 } // namespace
 
 void UnikeyState::rebuildPreedit(KeySym upcomingSym) {
@@ -179,25 +277,40 @@ void UnikeyState::rebuildPreedit(KeySym upcomingSym) {
         return;
     }
 
-    // Collect the last rebuildable segment before cursor.
-    const auto word = collectWordBeforeCursor(internal_.text, internal_.cursor);
-    if (word.length == 0) {
+    // Collect the contiguous rebuildable segment *around* the cursor.
+    // This supports mid-word insertion and matches internal-state tests.
+    const auto seg = collectSegmentAroundCursor(internal_.text, internal_.cursor);
+    if (seg.items.empty()) {
         return;
     }
 
-    FCITX_UNIKEY_DEBUG() << "[rebuildPreedit] Internal rebuild word len=" << word.length
-                         << " slice=\"" << word.utf8Slice << "\"";
+    FCITX_UNIKEY_DEBUG() << "[rebuildPreedit] Internal rebuild word len="
+                         << seg.items.size() << " slice=\"" << seg.utf8Slice
+                         << "\" cursorInSegment=" << seg.cursorInSegment;
 
     // Reset local composing buffer and engine state before rebuilding.
     uic_.resetBuf();
     preeditStr_.clear();
     keyStrokes_.clear();
 
-    replayItemsToEngine(uic_, word.items, this, keyStrokes_);
+    // Replay only the left part up to cursor so ukengine state matches the
+    // user's insertion point.
+    const size_t leftLen = std::min(seg.cursorInSegment, seg.items.size());
+    if (leftLen > 0) {
+        std::vector<RebuildItem> leftItems(seg.items.begin(),
+                                           seg.items.begin() + leftLen);
+        replayItemsToEngine(uic_, leftItems, this, keyStrokes_);
+    }
 
-    // Delete the old segment from the application and internal buffer.
-    // (We are positioned at cursor, and the word ends at cursor.)
-    deleteAroundCursor(-static_cast<int>(word.length), static_cast<int>(word.length));
+    // Store suffix so commit() can re-commit left+new+suffix as a single string.
+    pendingRecommitSuffix_ = seg.suffixUtf8;
+
+    // Delete the entire segment from the application/internal buffer.
+    // offset is relative to cursor.
+    const int offset = static_cast<int>(seg.startCharacter) -
+                       static_cast<int>(internal_.cursor);
+    const int size = static_cast<int>(seg.endCharacter - seg.startCharacter);
+    deleteAroundCursor(offset, size);
 
     // Show rebuilt preedit so the following key modifies it.
     updatePreedit();
