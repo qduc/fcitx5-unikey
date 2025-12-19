@@ -128,6 +128,40 @@ void UnikeyState::InternalTextState::backspace() {
     eraseRange(cursor - 1, cursor);
 }
 
+static bool isWordChar(uint32_t ch);
+
+void UnikeyState::InternalTextState::backspaceWord() {
+    if (hasSelection()) {
+        const auto [s, e] = selectionRange();
+        eraseRange(s, e);
+        clearSelection();
+        return;
+    }
+    clampCursor();
+    if (cursor == 0) {
+        return;
+    }
+
+    size_t start = cursor;
+    while (start > 0) {
+        auto it = utf8::nextNChar(text.begin(), start);
+        uint32_t ch = utf8::getLastChar(text.begin(), it);
+        if (isWordChar(ch)) {
+            break;
+        }
+        start -= 1;
+    }
+    while (start > 0) {
+        auto it = utf8::nextNChar(text.begin(), start);
+        uint32_t ch = utf8::getLastChar(text.begin(), it);
+        if (!isWordChar(ch)) {
+            break;
+        }
+        start -= 1;
+    }
+    eraseRange(start, cursor);
+}
+
 void UnikeyState::InternalTextState::del() {
     if (hasSelection()) {
         const auto [s, e] = selectionRange();
@@ -140,6 +174,41 @@ void UnikeyState::InternalTextState::del() {
         return;
     }
     eraseRange(cursor, cursor + 1);
+}
+
+void UnikeyState::InternalTextState::delWord() {
+    if (hasSelection()) {
+        const auto [s, e] = selectionRange();
+        eraseRange(s, e);
+        clearSelection();
+        return;
+    }
+    clampCursor();
+    const auto len = length();
+    if (cursor >= len) {
+        return;
+    }
+
+    size_t end = cursor;
+    while (end < len) {
+        auto it = utf8::nextNChar(text.begin(), end);
+        uint32_t ch = 0;
+        utf8::getNextChar(it, text.end(), &ch);
+        if (isWordChar(ch)) {
+            break;
+        }
+        end += 1;
+    }
+    while (end < len) {
+        auto it = utf8::nextNChar(text.begin(), end);
+        uint32_t ch = 0;
+        utf8::getNextChar(it, text.end(), &ch);
+        if (!isWordChar(ch)) {
+            break;
+        }
+        end += 1;
+    }
+    eraseRange(cursor, end);
 }
 
 static bool isWordChar(uint32_t ch) {
@@ -225,19 +294,24 @@ void UnikeyState::InternalTextState::moveRight(bool byWord, bool extendSelection
         return;
     }
 
-    // Word move: skip current word chars, then skip separators.
-    while (cursor < len) {
-        auto it = utf8::nextNChar(text.begin(), cursor);
-        uint32_t ch = 0;
-        utf8::getNextChar(it, text.end(), &ch);
-        if (!isWordChar(ch)) {
-            break;
+    // Word move: if on a word char, jump to end of that word.
+    // If on separators, jump to start of the next word.
+    auto it = utf8::nextNChar(text.begin(), cursor);
+    uint32_t ch = 0;
+    utf8::getNextChar(it, text.end(), &ch);
+    if (isWordChar(ch)) {
+        while (cursor < len) {
+            it = utf8::nextNChar(text.begin(), cursor);
+            utf8::getNextChar(it, text.end(), &ch);
+            if (!isWordChar(ch)) {
+                break;
+            }
+            cursor += 1;
         }
-        cursor += 1;
+        return;
     }
     while (cursor < len) {
-        auto it = utf8::nextNChar(text.begin(), cursor);
-        uint32_t ch = 0;
+        it = utf8::nextNChar(text.begin(), cursor);
         utf8::getNextChar(it, text.end(), &ch);
         if (isWordChar(ch)) {
             break;
@@ -418,11 +492,19 @@ void UnikeyState::applyPassThroughKeyToInternalState(KeySym sym,
         internal_.moveEnd(shift);
         return;
     case FcitxKey_BackSpace:
-        internal_.backspace();
+        if (ctrl) {
+            internal_.backspaceWord();
+        } else {
+            internal_.backspace();
+        }
         return;
     case FcitxKey_Delete:
     case FcitxKey_KP_Delete:
-        internal_.del();
+        if (ctrl) {
+            internal_.delWord();
+        } else {
+            internal_.del();
+        }
         return;
     case FcitxKey_Return:
     case FcitxKey_KP_Enter:

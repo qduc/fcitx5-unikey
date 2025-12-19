@@ -77,6 +77,8 @@ void printCases() {
     std::cout << " 28: State consistency after Vietnamese composition\n";
     std::cout << " 29: State consistency after tone changes\n";
     std::cout << " 30: Complex sequence - type, select, delete, type again\n";
+    std::cout << " 31: Ctrl+BackSpace word deletion\n";
+    std::cout << " 32: Ctrl+Delete word deletion\n";
 }
 
 void announceCase(int id) {
@@ -304,8 +306,8 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             // Ctrl+Left (should jump to start of "planet")
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("Control+Left"), false);
 
-            // Type 'k' → "hello kplanet"
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("hello kplanet");
+            // Type 'k' → "kplanet"
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("kplanet");
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("k"), false);
         }
 
@@ -347,7 +349,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("Control+Right"), false);
 
             // Type 'k' at the new cursor position → "hellok planet"
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("hellok planet");
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("hellok");
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("k"), false);
         }
 
@@ -792,6 +794,92 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
 
             // Type 'x' → "ax"
             testfrontend->call<ITestFrontend::pushCommitExpectation>("ak");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("k"), false);
+        }
+
+        // --- Test: Ctrl+BackSpace word deletion ---
+        if (shouldRunCase(selCopy, 31)) {
+            announceCase(31);
+            FCITX_INFO() << "testinternalstate: Case 31 - Ctrl+BackSpace word deletion";
+
+            ic->reset();
+
+            // Type "hello planet" (avoid Telex special letters like 'w')
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("h");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("h"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("he");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("e"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("hel");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("l"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("hell");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("l"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("hello");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("o"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("hello ");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("p");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("p"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("pl");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("l"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("pla");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("plan");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("n"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("plane");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("e"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("planet");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("t"), false);
+
+            // Ctrl+BackSpace (delete previous word)
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("Control+BackSpace"), false);
+
+            // Type 'k' → "hello k"
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("hello k");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("k"), false);
+        }
+
+        // --- Test: Ctrl+Delete word deletion ---
+        if (shouldRunCase(selCopy, 32)) {
+            announceCase(32);
+            FCITX_INFO() << "testinternalstate: Case 32 - Ctrl+Delete word deletion";
+
+            ic->reset();
+
+            // Type "hello planet" (avoid Telex special letters like 'w')
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("h");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("h"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("he");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("e"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("hel");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("l"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("hell");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("l"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("hello");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("o"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("hello ");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("p");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("p"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("pl");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("l"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("pla");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("plan");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("n"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("plane");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("e"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("planet");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("t"), false);
+
+            // Move to end of "hello" (before the space).
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("Home"), false);
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("Control+Right"), false);
+
+            // Ctrl+Delete (delete next word including separator)
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("Control+Delete"), false);
+
+            // Type 'k' → "hellok"
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("hellok");
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("k"), false);
         }
 

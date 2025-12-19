@@ -80,7 +80,9 @@ private:
 
         // Backspace/delete semantics (operate on selection if any).
         void backspace();
+        void backspaceWord();
         void del();
+        void delWord();
 
         // Cursor movement.
         void moveLeft(bool byWord, bool extendSelection);
