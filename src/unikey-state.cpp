@@ -102,13 +102,9 @@ void UnikeyState::keyEvent(KeyEvent &keyEvent) {
 
 bool UnikeyState::isUnsupportedSurroundingApp() const {
     const auto prog = ic_->program();
-    // Existing Firefox matches
-    if (prog == "firefox" || prog == "org.mozilla.firefox" ||
-        prog == "firefox-bin" || prog == "Firefox") {
-        return true;
-    }
+    // Firefox is now supported via internal state tracking for immediate commit mode.
     // Treat various LibreOffice frontends as unsupported for surrounding-text
-    // handling (similar to Firefox) due to inconsistent surrounding snapshots.
+    // handling due to inconsistent surrounding snapshots.
     if (prog == "libreoffice" || prog == "LibreOffice" ||
         prog == "soffice" || prog == "soffice.bin" ||
         prog == "libreoffice-writer" || prog == "org.libreoffice.LibreOffice") {
@@ -118,14 +114,36 @@ bool UnikeyState::isUnsupportedSurroundingApp() const {
     return false;
 }
 
+bool UnikeyState::isFirefox() const {
+    const auto prog = ic_->program();
+    return (prog == "firefox" || prog == "org.mozilla.firefox" ||
+            prog == "firefox-bin" || prog == "Firefox");
+}
+
 bool UnikeyState::immediateCommitMode() const {
     if (!*this->engine_->config().immediateCommit) {
         FCITX_UNIKEY_DEBUG() << "[immediateCommitMode] Disabled in config";
         return false;
     }
 
+    // Firefox gets special treatment: enable immediate commit using internal
+    // state tracking even if surrounding text is unreliable. This bypasses
+    // Firefox's buggy Wayland surrounding text implementation.
+    if (isFirefox()) {
+        if (*this->engine_->config().oc != UkConv::XUTF8) {
+            FCITX_UNIKEY_DEBUG() << "[immediateCommitMode] Firefox: charset not UTF-8";
+            return false;
+        }
+        if (!ic_->capabilityFlags().test(CapabilityFlag::SurroundingText)) {
+            FCITX_UNIKEY_DEBUG() << "[immediateCommitMode] Firefox: no surrounding capability";
+            return false;
+        }
+        FCITX_UNIKEY_DEBUG() << "[immediateCommitMode] ENABLED for Firefox (internal state mode)";
+        return true;
+    }
+
     if (isUnsupportedSurroundingApp()) {
-        FCITX_UNIKEY_DEBUG() << "[immediateCommitMode] Disabled for unsupported app (Firefox/LibreOffice)";
+        FCITX_UNIKEY_DEBUG() << "[immediateCommitMode] Disabled for unsupported app";
         return false;
     }
 
@@ -266,6 +284,13 @@ void UnikeyState::preedit(KeyEvent &keyEvent, bool allowImmediateCommitForThisKe
         sym == FcitxKey_KP_Enter ||
         (sym >= FcitxKey_Home && sym <= FcitxKey_Insert) ||
         (sym >= FcitxKey_KP_Home && sym <= FcitxKey_KP_Delete)) {
+        // Navigation/control keys break forward-typing flow in Firefox.
+        // Clear internal state so we don't incorrectly rewrite at new cursor position.
+        if (isFirefox()) {
+            FCITX_UNIKEY_DEBUG() << "[preedit] Firefox navigation key, clearing internal state";
+            lastImmediateWord_.clear();
+            lastImmediateWordCharCount_ = 0;
+        }
         handleIgnoredKey();
         return;
     }
@@ -488,6 +513,13 @@ void UnikeyState::preedit(KeyEvent &keyEvent, bool allowImmediateCommitForThisKe
     } // end capture printable char
 
     // non process key
+    // Non-ASCII keys (outside printable range) break forward-typing in Firefox.
+    // Clear internal state to avoid incorrect rewrites.
+    if (isFirefox() && (sym < FcitxKey_space || sym > FcitxKey_asciitilde)) {
+        FCITX_UNIKEY_DEBUG() << "[preedit] Firefox non-ASCII key " << sym << ", clearing internal state";
+        lastImmediateWord_.clear();
+        lastImmediateWordCharCount_ = 0;
+    }
     handleIgnoredKey();
 }
 
@@ -502,7 +534,14 @@ void UnikeyState::handleIgnoredKey() {
 }
 
 void UnikeyState::commit() {
-    if (recordNextCommitAsImmediateWord_) {
+    // For Firefox, always record commits to maintain internal state for forward typing.
+    // For other apps, only record when explicitly requested.
+    bool shouldRecord = recordNextCommitAsImmediateWord_;
+    if (isFirefox() && immediateCommitMode()) {
+        shouldRecord = true;
+    }
+
+    if (shouldRecord) {
         recordNextCommitAsImmediateWord_ = false;
 
         // Strip trailing word break symbols (e.g. space) to extract the actual word.

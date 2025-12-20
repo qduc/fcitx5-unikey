@@ -33,6 +33,7 @@ public:
 
     bool immediateCommitMode() const;
     bool isUnsupportedSurroundingApp() const;
+    bool isFirefox() const;
     void eraseChars(int num_chars);
     void reset();
 

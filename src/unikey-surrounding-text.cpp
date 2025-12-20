@@ -447,6 +447,12 @@ size_t UnikeyState::rebuildStateFromSurrounding(bool deleteSurrounding) {
 }
 
 size_t UnikeyState::rebuildStateFromLastImmediateWord(bool deleteSurrounding, KeySym upcomingSym) {
+    // Don't rebuild if there's an active selection
+    if (ic_->surroundingText().isValid() &&
+        !ic_->surroundingText().selectedText().empty()) {
+        return 0;
+    }
+
     if (lastImmediateWord_.empty() || lastImmediateWordCharCount_ == 0 ||
         lastImmediateWordCharCount_ > MAX_LENGTH_VNWORD) {
         return 0;
@@ -558,6 +564,26 @@ void UnikeyState::rebuildPreedit(KeySym upcomingSym) {
     if (!hasSurrounding) {
         std::cerr << "[rebuildPreedit] SurroundingText capability not available" << std::endl;
         return;
+    }
+
+    // Firefox-specific path: prioritize internal state over surrounding text.
+    // Firefox's surrounding text is unreliable on Wayland, so we use our
+    // tracked lastImmediateWord_ as the primary rebuild source.
+    if (isFirefox() && !lastImmediateWord_.empty()) {
+        FCITX_UNIKEY_DEBUG()
+            << "[rebuildPreedit] Firefox mode: rebuilding from internal state first";
+        const size_t fallbackLen =
+            rebuildStateFromLastImmediateWord(true, upcomingSym);
+        if (fallbackLen > 0) {
+            FCITX_UNIKEY_DEBUG() << "[rebuildPreedit] Firefox internal rebuild succeeded: "
+                                 << fallbackLen << " chars";
+            updatePreedit();
+            return;
+        }
+        // If internal rebuild failed (shouldn't happen in forward-typing),
+        // fall through to try surrounding text as backup.
+        FCITX_UNIKEY_DEBUG()
+            << "[rebuildPreedit] Firefox internal rebuild failed, trying surrounding";
     }
 
     // Recovery probe: if we're currently in unreliable mode, do not attempt
