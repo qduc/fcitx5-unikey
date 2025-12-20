@@ -754,7 +754,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             // Enable immediate commit mode for Firefox (now supported via internal state)
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "True");
-            cfg.setValueByPath("InputMethod", "1"); // VNI
+            cfg.setValueByPath("InputMethod", "VNI");
             configureUnikey(unikey, cfg);
 
             icFirefox->reset();
@@ -774,21 +774,21 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             icFirefox->updateSurroundingText();
 
             // Type "6" (VNI breve) → should rebuild from internal state "a"
-            // Deletes "a" (-1 char), commits "ă"
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("ă");
+            // Deletes "a" (-1 char), commits "â"
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("â");
             testfrontend->call<ITestFrontend::keyEvent>(uuidFirefox, Key("6"), false);
 
             // Firefox still returns stale surrounding
             icFirefox->surroundingText().setText("", 0, 0);
             icFirefox->updateSurroundingText();
 
-            // Type "1" (VNI acute tone) → rebuilds from internal "ă"
-            // Deletes "ă" (-1 char), commits "ắ"
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("ắ");
+            // Type "1" (VNI acute tone) → rebuilds from internal "â"
+            // Deletes "â" (-1 char), commits "ắ"
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("ấ");
             testfrontend->call<ITestFrontend::keyEvent>(uuidFirefox, Key("1"), false);
 
             // Type space to complete the word
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("ắ ");
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("ấ ");
             testfrontend->call<ITestFrontend::keyEvent>(uuidFirefox, Key("space"), false);
         }
 
@@ -807,7 +807,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
 
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "True");
-            cfg.setValueByPath("InputMethod", "1"); // VNI
+            cfg.setValueByPath("InputMethod", "VNI");
             configureUnikey(unikey, cfg);
 
             icFirefox->reset();
@@ -821,15 +821,15 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             testfrontend->call<ITestFrontend::pushCommitExpectation>("a");
             testfrontend->call<ITestFrontend::keyEvent>(uuidFirefox, Key("a"), false);
 
-            // Type "6" (breve) → commits "ă"
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("ă");
+            // Type "6" (breve) → commits "â"
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("â");
             testfrontend->call<ITestFrontend::keyEvent>(uuidFirefox, Key("6"), false);
 
             // Press Left arrow - should clear internal state
             // Arrow key is passed through, doesn't commit anything
             testfrontend->call<ITestFrontend::keyEvent>(uuidFirefox, Key("Left"), false);
 
-            // Now type "a" - should be a fresh "a", NOT merged with previous "ă"
+            // Now type "a" - should be a fresh "a", NOT merged with previous "â"
             testfrontend->call<ITestFrontend::pushCommitExpectation>("a");
             testfrontend->call<ITestFrontend::keyEvent>(uuidFirefox, Key("a"), false);
         }
@@ -847,7 +847,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
 
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "True");
-            cfg.setValueByPath("InputMethod", "1"); // VNI
+            cfg.setValueByPath("InputMethod", "VNI");
             configureUnikey(unikey, cfg);
 
             icFirefox->reset();
@@ -862,13 +862,13 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             icFirefox->surroundingText().setText("", 0, 0);
             icFirefox->updateSurroundingText();
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("ă");
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("â");
             testfrontend->call<ITestFrontend::keyEvent>(uuidFirefox, Key("6"), false);
 
             // Non-ASCII key (Return) should clear internal state.
             testfrontend->call<ITestFrontend::keyEvent>(uuidFirefox, Key("Return"), false);
 
-            // With state cleared, "1" should not merge with previous "ă".
+            // With state cleared, "1" should not merge with previous "â".
             testfrontend->call<ITestFrontend::pushCommitExpectation>("1");
             testfrontend->call<ITestFrontend::keyEvent>(uuidFirefox, Key("1"), false);
         }
@@ -885,7 +885,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
 
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "True");
-            cfg.setValueByPath("InputMethod", "1"); // VNI
+            cfg.setValueByPath("InputMethod", "VNI");
             configureUnikey(unikey, cfg);
 
             icFirefox->reset();
@@ -900,7 +900,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             icFirefox->surroundingText().setText("", 0, 0);
             icFirefox->updateSurroundingText();
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("ă");
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("â");
             testfrontend->call<ITestFrontend::keyEvent>(uuidFirefox, Key("6"), false);
 
             // Simulate focus change; should clear internal state.
@@ -922,7 +922,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
 
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "True");
-            cfg.setValueByPath("InputMethod", "1"); // VNI
+            cfg.setValueByPath("InputMethod", "VNI");
             configureUnikey(unikey, cfg);
 
             icFirefox->reset();
@@ -937,7 +937,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             icFirefox->surroundingText().setText("", 0, 0);
             icFirefox->updateSurroundingText();
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("ă");
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("â");
             testfrontend->call<ITestFrontend::keyEvent>(uuidFirefox, Key("6"), false);
 
             // Mark a selection; internal rebuild should be skipped.
@@ -960,7 +960,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
 
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "True");
-            cfg.setValueByPath("InputMethod", "1"); // VNI
+            cfg.setValueByPath("InputMethod", "VNI");
             configureUnikey(unikey, cfg);
 
             icFirefox->reset();

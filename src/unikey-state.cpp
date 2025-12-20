@@ -510,7 +510,7 @@ void UnikeyState::preedit(KeyEvent &keyEvent, bool allowImmediateCommitForThisKe
             // Record this commit as the latest immediate-commit word if it
             // looks like a word (no spaces / breaks). This will be used as a
             // fallback rewrite source when surrounding text is stale/empty.
-            // recordNextCommitAsImmediateWord_ = true;
+            recordNextCommitAsImmediateWord_ = true;
             commit();
             keyEvent.filterAndAccept();
             return;
