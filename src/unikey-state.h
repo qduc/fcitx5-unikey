@@ -84,6 +84,12 @@ private:
     std::string lastImmediateWord_;
     size_t lastImmediateWordCharCount_ = 0;
     bool recordNextCommitAsImmediateWord_ = false;
+
+    // Firefox-specific: Cursor offset from END of word (0 = at end).
+    // Used to track cursor position for arrow key navigation and backspace.
+    // Example: "ăn" with offset 0 → cursor after "n"
+    //          "ăn" with offset 1 → cursor after "ă"
+    size_t firefoxCursorOffsetFromEnd_ = 0;
 };
 
 } // namespace fcitx
