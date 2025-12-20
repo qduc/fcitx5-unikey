@@ -834,6 +834,163 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             testfrontend->call<ITestFrontend::keyEvent>(uuidFirefox, Key("a"), false);
         }
 
+        // --- Case 25: Firefox non-ASCII key clears internal state ---
+        // Non-ASCII keys should clear internal state to avoid incorrect rewrites.
+        if (shouldRunCase(selCopy, 25)) {
+            announceCase(25);
+            FCITX_INFO() << "testsurroundingtext: Case 25 - Firefox non-ASCII key clears state";
+
+            auto uuidFirefox = testfrontend->call<ITestFrontend::createInputContext>("firefox");
+            auto *icFirefox = instance->inputContextManager().findByUUID(uuidFirefox);
+            FCITX_ASSERT(icFirefox);
+            icFirefox->setCapabilityFlags(CapabilityFlag::SurroundingText);
+
+            RawConfig cfg = base;
+            cfg.setValueByPath("ImmediateCommit", "True");
+            cfg.setValueByPath("InputMethod", "1"); // VNI
+            configureUnikey(unikey, cfg);
+
+            icFirefox->reset();
+            icFirefox->surroundingText().setText("", 0, 0);
+            icFirefox->updateSurroundingText();
+
+            testfrontend->call<ITestFrontend::keyEvent>(uuidFirefox, Key("Control+space"), false);
+
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("a");
+            testfrontend->call<ITestFrontend::keyEvent>(uuidFirefox, Key("a"), false);
+
+            icFirefox->surroundingText().setText("", 0, 0);
+            icFirefox->updateSurroundingText();
+
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("ă");
+            testfrontend->call<ITestFrontend::keyEvent>(uuidFirefox, Key("6"), false);
+
+            // Non-ASCII key (Return) should clear internal state.
+            testfrontend->call<ITestFrontend::keyEvent>(uuidFirefox, Key("Return"), false);
+
+            // With state cleared, "1" should not merge with previous "ă".
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("1");
+            testfrontend->call<ITestFrontend::keyEvent>(uuidFirefox, Key("1"), false);
+        }
+
+        // --- Case 26: Firefox focus change clears internal state ---
+        if (shouldRunCase(selCopy, 26)) {
+            announceCase(26);
+            FCITX_INFO() << "testsurroundingtext: Case 26 - Firefox focus change clears state";
+
+            auto uuidFirefox = testfrontend->call<ITestFrontend::createInputContext>("firefox");
+            auto *icFirefox = instance->inputContextManager().findByUUID(uuidFirefox);
+            FCITX_ASSERT(icFirefox);
+            icFirefox->setCapabilityFlags(CapabilityFlag::SurroundingText);
+
+            RawConfig cfg = base;
+            cfg.setValueByPath("ImmediateCommit", "True");
+            cfg.setValueByPath("InputMethod", "1"); // VNI
+            configureUnikey(unikey, cfg);
+
+            icFirefox->reset();
+            icFirefox->surroundingText().setText("", 0, 0);
+            icFirefox->updateSurroundingText();
+
+            testfrontend->call<ITestFrontend::keyEvent>(uuidFirefox, Key("Control+space"), false);
+
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("a");
+            testfrontend->call<ITestFrontend::keyEvent>(uuidFirefox, Key("a"), false);
+
+            icFirefox->surroundingText().setText("", 0, 0);
+            icFirefox->updateSurroundingText();
+
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("ă");
+            testfrontend->call<ITestFrontend::keyEvent>(uuidFirefox, Key("6"), false);
+
+            // Simulate focus change; should clear internal state.
+            icFirefox->reset();
+
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("1");
+            testfrontend->call<ITestFrontend::keyEvent>(uuidFirefox, Key("1"), false);
+        }
+
+        // --- Case 27: Firefox selection skips internal rebuild ---
+        if (shouldRunCase(selCopy, 27)) {
+            announceCase(27);
+            FCITX_INFO() << "testsurroundingtext: Case 27 - Firefox selection skips internal rebuild";
+
+            auto uuidFirefox = testfrontend->call<ITestFrontend::createInputContext>("firefox");
+            auto *icFirefox = instance->inputContextManager().findByUUID(uuidFirefox);
+            FCITX_ASSERT(icFirefox);
+            icFirefox->setCapabilityFlags(CapabilityFlag::SurroundingText);
+
+            RawConfig cfg = base;
+            cfg.setValueByPath("ImmediateCommit", "True");
+            cfg.setValueByPath("InputMethod", "1"); // VNI
+            configureUnikey(unikey, cfg);
+
+            icFirefox->reset();
+            icFirefox->surroundingText().setText("", 0, 0);
+            icFirefox->updateSurroundingText();
+
+            testfrontend->call<ITestFrontend::keyEvent>(uuidFirefox, Key("Control+space"), false);
+
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("a");
+            testfrontend->call<ITestFrontend::keyEvent>(uuidFirefox, Key("a"), false);
+
+            icFirefox->surroundingText().setText("", 0, 0);
+            icFirefox->updateSurroundingText();
+
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("ă");
+            testfrontend->call<ITestFrontend::keyEvent>(uuidFirefox, Key("6"), false);
+
+            // Mark a selection; internal rebuild should be skipped.
+            icFirefox->surroundingText().setText("foo", 1, 3);
+            icFirefox->updateSurroundingText();
+
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("1");
+            testfrontend->call<ITestFrontend::keyEvent>(uuidFirefox, Key("1"), false);
+        }
+
+        // --- Case 28: Firefox rapid typing chain using internal state ---
+        if (shouldRunCase(selCopy, 28)) {
+            announceCase(28);
+            FCITX_INFO() << "testsurroundingtext: Case 28 - Firefox rapid typing chain";
+
+            auto uuidFirefox = testfrontend->call<ITestFrontend::createInputContext>("firefox");
+            auto *icFirefox = instance->inputContextManager().findByUUID(uuidFirefox);
+            FCITX_ASSERT(icFirefox);
+            icFirefox->setCapabilityFlags(CapabilityFlag::SurroundingText);
+
+            RawConfig cfg = base;
+            cfg.setValueByPath("ImmediateCommit", "True");
+            cfg.setValueByPath("InputMethod", "1"); // VNI
+            configureUnikey(unikey, cfg);
+
+            icFirefox->reset();
+            icFirefox->surroundingText().setText("", 0, 0);
+            icFirefox->updateSurroundingText();
+
+            testfrontend->call<ITestFrontend::keyEvent>(uuidFirefox, Key("Control+space"), false);
+
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("t");
+            testfrontend->call<ITestFrontend::keyEvent>(uuidFirefox, Key("t"), false);
+
+            icFirefox->surroundingText().setText("", 0, 0);
+            icFirefox->updateSurroundingText();
+
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("to");
+            testfrontend->call<ITestFrontend::keyEvent>(uuidFirefox, Key("o"), false);
+
+            icFirefox->surroundingText().setText("", 0, 0);
+            icFirefox->updateSurroundingText();
+
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("toi");
+            testfrontend->call<ITestFrontend::keyEvent>(uuidFirefox, Key("i"), false);
+
+            icFirefox->surroundingText().setText("", 0, 0);
+            icFirefox->updateSurroundingText();
+
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("tôi");
+            testfrontend->call<ITestFrontend::keyEvent>(uuidFirefox, Key("6"), false);
+        }
+
         instance->deactivate();
         dispatcher->schedule([dispatcher, instance]() {
             dispatcher->detach();
