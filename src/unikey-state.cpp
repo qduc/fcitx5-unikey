@@ -307,25 +307,10 @@ void UnikeyState::preedit(KeyEvent &keyEvent, bool allowImmediateCommitForThisKe
                 return;
             }
 
-            // Firefox-specific: backspace at end of word preserves state for error correction
-            if (isFirefox() && !lastImmediateWord_.empty() &&
-                firefoxCursorOffsetFromEnd_ == 0 &&
-                lastImmediateWordCharCount_ > 0) {
-                FCITX_INFO() << "[preedit] Firefox backspace at word end, preserving state";
-
-                // Remove last UTF-8 character from internal state
-                auto it = utf8::nextNChar(lastImmediateWord_.begin(),
-                                          lastImmediateWordCharCount_ - 1);
-                lastImmediateWord_.erase(it, lastImmediateWord_.end());
-                lastImmediateWordCharCount_--;
-
-                FCITX_INFO() << "[preedit] Updated lastImmediateWord_: \"" << lastImmediateWord_
-                             << "\" charCount: " << lastImmediateWordCharCount_;
-
-                // Delete the character in the application
-                ic_->deleteSurroundingText(-1, 1);
-                reset();  // Clears preedit but keeps lastImmediateWord_
-                keyEvent.filterAndAccept();
+            // Firefox: let the application handle Backspace to respect selections.
+            if (isFirefox()) {
+                clearImmediateCommitHistory();
+                reset();
                 return;
             }
 
