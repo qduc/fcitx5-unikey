@@ -81,12 +81,23 @@ This creates detailed logs in `build/.ctest-2pass/` with verbose output from eac
 - Implements "Immediate Commit Mode" for apps with limited preedit support
 - Tracks surrounding text reliability with failure thresholds and recovery counters
 - Maintains last committed word fallback for unreliable apps
+- **Shift+Shift restoration**: Detects two different shift key taps in sequence to restore previous keystrokes for editing
+- **Shift+Space**: Commits current composition with a space character
+- **BackSpace handling**: Special logic in immediate commit mode to delete from surrounding text or preedit
+- **Firefox special support**: Enables immediate commit using internal state tracking even with unreliable surrounding text (bypasses Firefox's buggy Wayland implementation)
+- **VNI tone/shape key fallback**: In unreliable mode, can still safely rewrite VNI digits using internal `lastImmediateWord_` history
 
 **Surrounding Text Handler** (`src/unikey-surrounding-text.cpp`)
 - Rebuilds Vietnamese composition state from existing text in input field
 - Critical for immediate commit mode in Firefox, Chromium, etc.
 - Implements reliability detection (2 failures → unreliable, 3 successes → recover)
 - Provides fallback mechanisms when apps return empty/stale surrounding text
+- **Stale snapshot detection**: Identifies when applications return empty/outdated surrounding text after commits (e.g., Firefox, Chromium)
+- **`rebuildStateFromSurrounding()`**: Reconstructs composition state from surrounding text by collecting last contiguous word before cursor
+- **`rebuildStateFromLastImmediateWord()`**: Fallback path that uses internally-tracked last committed word when surrounding text is unavailable or unreliable
+- **Modify Surrounding Text mode**: Alternative approach that rewrites already-committed text in the input field instead of using preedit
+- **Last committed word tracking**: Maintains `lastImmediateWord_` as insurance against stale/buggy surrounding text snapshots
+- **Truncation detection**: Recognizes when collected word appears to be a truncated version of expected composition
 
 **Unikey Library** (`unikey/` directory - WARNING: don't touch this)
 - Upstream Unikey engine for Vietnamese input processing
