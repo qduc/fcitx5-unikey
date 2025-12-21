@@ -55,11 +55,6 @@ void UnikeyState::keyEvent(KeyEvent &keyEvent) {
         return;
     }
 
-    std::cerr << "[keyEvent] Key: " << keyEvent.rawKey().sym()
-                         << " isRelease: " << keyEvent.isRelease()
-                         << " Shift: " << keyEvent.rawKey().states().test(KeyState::Shift)
-                         << " Ctrl: " << keyEvent.rawKey().states().test(KeyState::Ctrl)
-                         << " Alt: " << keyEvent.rawKey().states().test(KeyState::Alt) << std::endl;
 
     // Snapshot whether immediate-commit is allowed for this keystroke BEFORE
     // any surrounding-text rebuild attempts. rebuildPreedit() may mark
@@ -241,7 +236,6 @@ void UnikeyState::preedit(KeyEvent &keyEvent, bool allowImmediateCommitForThisKe
     auto sym = keyEvent.rawKey().sym();
     auto state = keyEvent.rawKey().states();
 
-    std::cerr << "[preedit] Entering preedit with sym=" << sym << " Shift=" << state.test(KeyState::Shift) << std::endl;
     // for VNI input method (tone/shape keys are digits) and also matches user
     // expectations: KP_1 should behave like '1'.
     if (sym >= FcitxKey_KP_0 && sym <= FcitxKey_KP_9) {
@@ -265,7 +259,6 @@ void UnikeyState::preedit(KeyEvent &keyEvent, bool allowImmediateCommitForThisKe
             lastShiftPressed_ = keyEvent.rawKey().sym();
         } else {
             // A second shift press (same or different) triggers restore.
-            std::cerr << "[preedit] Shift+Shift detected, restoring keystrokes" << std::endl;
             uic_.restoreKeyStrokes();
             preeditStr_.clear();
             syncState(FcitxKey_None);
@@ -488,7 +481,6 @@ void UnikeyState::preedit(KeyEvent &keyEvent, bool allowImmediateCommitForThisKe
         // shift + space, shift + shift event
         if (!lastKeyWithShift_ && state.test(KeyState::Shift) &&
             sym == FcitxKey_space && !uic_.isAtWordBeginning()) {
-            std::cerr << "[preedit] Shift+Space detected, restoring keystrokes" << std::endl;
             uic_.restoreKeyStrokes();
             preeditStr_.clear();
             syncState(FcitxKey_None);
@@ -507,6 +499,115 @@ void UnikeyState::preedit(KeyEvent &keyEvent, bool allowImmediateCommitForThisKe
 
         if (immediateCommit) {
             FCITX_UNIKEY_DEBUG() << "[preedit] ImmediateCommit: committing \"" << preeditStr_ << "\"";
+            if (isFirefox() && !lastImmediateWord_.empty()) {
+                auto logSurrounding = [&](const char *tag) {
+                    ic_->updateSurroundingText();
+                    const auto &st = ic_->surroundingText();
+                    if (!st.isValid()) {
+                        FCITX_UNIKEY_DEBUG() << tag << " surrounding invalid";
+                        return;
+                    }
+                    std::string text = st.text();
+                    if (text.size() > 80) {
+                        text.resize(80);
+                        text.append("...");
+                    }
+                    FCITX_UNIKEY_DEBUG() << tag << " text=\"" << text << "\" cursor="
+                                         << st.cursor() << " selection=\""
+                                         << st.selectedText() << "\"";
+                };
+
+                logSurrounding("[firefox-immediate] before");
+                const std::string fullWord = preeditStr_;
+                auto itLast = lastImmediateWord_.begin();
+                auto itFull = fullWord.begin();
+                const auto endLast = lastImmediateWord_.end();
+                const auto endFull = fullWord.end();
+                size_t commonChars = 0;
+                size_t fullByteIndex = 0;
+                while (itLast != endLast && itFull != endFull) {
+                    uint32_t lastChar = 0;
+                    uint32_t fullChar = 0;
+                    auto nextLast = utf8::getNextChar(itLast, endLast, &lastChar);
+                    auto nextFull = utf8::getNextChar(itFull, endFull, &fullChar);
+                    if (lastChar == utf8::INVALID_CHAR ||
+                        lastChar == utf8::NOT_ENOUGH_SPACE ||
+                        fullChar == utf8::INVALID_CHAR ||
+                        fullChar == utf8::NOT_ENOUGH_SPACE) {
+                        break;
+                    }
+                    if (lastChar != fullChar) {
+                        break;
+                    }
+                    commonChars++;
+                    fullByteIndex = static_cast<size_t>(nextFull - fullWord.begin());
+                    itLast = nextLast;
+                    itFull = nextFull;
+                }
+
+                const size_t fullLen = utf8::lengthValidated(fullWord);
+                const bool endsWithWordBreak =
+                    !fullWord.empty() &&
+                    static_cast<unsigned char>(fullWord.back()) < 0x80 &&
+                    isWordBreakSym(static_cast<unsigned char>(fullWord.back()));
+                if (fullLen != utf8::INVALID_LENGTH) {
+                    if (commonChars == lastImmediateWordCharCount_ &&
+                        fullByteIndex < fullWord.size()) {
+                        const std::string suffix = fullWord.substr(fullByteIndex);
+                        if (endsWithWordBreak) {
+                            lastImmediateWord_.clear();
+                            lastImmediateWordCharCount_ = 0;
+                        } else {
+                            lastImmediateWord_ = fullWord;
+                            lastImmediateWordCharCount_ = static_cast<size_t>(fullLen);
+                        }
+                        firefoxCursorOffsetFromEnd_ = 0;
+                        recordNextCommitAsImmediateWord_ = false;
+                        if (!suffix.empty()) {
+                            ic_->commitString(suffix);
+                        }
+                        logSurrounding("[firefox-immediate] after-append");
+                        reset();
+                        keyEvent.filterAndAccept();
+                        return;
+                    }
+
+                    if (commonChars > 0 && commonChars < lastImmediateWordCharCount_) {
+                        const size_t deleteCount =
+                            lastImmediateWordCharCount_ - commonChars;
+                        if (deleteCount > 0) {
+                            logSurrounding("[firefox-immediate] before-delete");
+                            ic_->deleteSurroundingText(-static_cast<int>(deleteCount),
+                                                       static_cast<int>(deleteCount));
+                            logSurrounding("[firefox-immediate] after-delete");
+                        }
+                        const std::string suffix = fullWord.substr(fullByteIndex);
+                        if (endsWithWordBreak) {
+                            lastImmediateWord_.clear();
+                            lastImmediateWordCharCount_ = 0;
+                        } else {
+                            lastImmediateWord_ = fullWord;
+                            lastImmediateWordCharCount_ = static_cast<size_t>(fullLen);
+                        }
+                        firefoxCursorOffsetFromEnd_ = 0;
+                        recordNextCommitAsImmediateWord_ = false;
+                        if (!suffix.empty()) {
+                            ic_->commitString(suffix);
+                        }
+                        logSurrounding("[firefox-immediate] after-rewrite");
+                        reset();
+                        keyEvent.filterAndAccept();
+                        return;
+                    }
+                }
+
+                if (lastImmediateWordCharCount_ > 0) {
+                    logSurrounding("[firefox-immediate] before-delete");
+                    ic_->deleteSurroundingText(-static_cast<int>(lastImmediateWordCharCount_),
+                                               static_cast<int>(lastImmediateWordCharCount_));
+                    logSurrounding("[firefox-immediate] after-delete");
+                }
+            }
             // Record this commit as the latest immediate-commit word if it
             // looks like a word (no spaces / breaks). This will be used as a
             // fallback rewrite source when surrounding text is stale/empty.
@@ -601,35 +702,23 @@ void UnikeyState::commit() {
             lastImmediateWord_ = candidate;
             lastImmediateWordCharCount_ = static_cast<size_t>(charLen);
             firefoxCursorOffsetFromEnd_ = 0;  // Reset cursor to word end after commit
-            std::cerr << "[commit] Recorded last immediate word: \"" << lastImmediateWord_
-                << "\" chars=" << lastImmediateWordCharCount_ << std::endl;
         } else {
             lastImmediateWord_.clear();
             lastImmediateWordCharCount_ = 0;
             firefoxCursorOffsetFromEnd_ = 0;
-            std::cerr << "[commit] Not recording immediate word (empty or unsafe)" << std::endl;
         }
     }
 
     if (!preeditStr_.empty()) {
-        std::cerr << "[commit] Committing string: \"" << preeditStr_ << "\"" << std::endl;
         ic_->commitString(preeditStr_);
-    } else {
-        std::cerr << "[commit] Preedit is empty, nothing to commit" << std::endl;
     }
     reset();
 }
 
 void UnikeyState::syncState(KeySym sym) {
     // process result of ukengine
-    std::cerr << "[syncState] Engine backspaces: " << uic_.backspaces()
-                         << " bufChars: " << uic_.bufChars()
-                         << " keySymbol: " << sym << std::endl;
-
     if (uic_.backspaces() > 0) {
-        std::cerr << "[syncState] Backspaces requested: " << uic_.backspaces() << std::endl;
         if (static_cast<int>(preeditStr_.length()) <= uic_.backspaces()) {
-            std::cerr << "[syncState] Clearing entire preedit" << std::endl;
             preeditStr_.clear();
         } else {
             eraseChars(uic_.backspaces());
@@ -637,7 +726,6 @@ void UnikeyState::syncState(KeySym sym) {
     }
 
     if (uic_.bufChars() > 0) {
-        std::cerr << "[syncState] Engine output: " << uic_.bufChars() << " chars" << std::endl;
         if (*this->engine_->config().oc == UkConv::XUTF8) {
             preeditStr_.append(reinterpret_cast<const char *>(uic_.buf()),
                                uic_.bufChars());
@@ -648,13 +736,10 @@ void UnikeyState::syncState(KeySym sym) {
             latinToUtf(buf, uic_.buf(), uic_.bufChars(), &bufSize);
             preeditStr_.append((const char *)buf, CONVERT_BUF_SIZE - bufSize);
         }
-        std::cerr << "[syncState] After append: \"" << preeditStr_ << "\"" << std::endl;
     } else if (sym != FcitxKey_Shift_L && sym != FcitxKey_Shift_R &&
                sym != FcitxKey_None) // if ukengine not process
     {
-        std::cerr << "[syncState] Engine didn't process, appending raw symbol: " << sym << std::endl;
         preeditStr_.append(utf8::UCS4ToUTF8(sym));
-        std::cerr << "[syncState] After raw append: \"" << preeditStr_ << "\"" << std::endl;
     }
     // end process result of ukengine
 }
