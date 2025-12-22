@@ -278,22 +278,8 @@ void UnikeyState::preedit(KeyEvent &keyEvent, bool allowImmediateCommitForThisKe
         sym == FcitxKey_KP_Enter ||
         (sym >= FcitxKey_Home && sym <= FcitxKey_Insert) ||
         (sym >= FcitxKey_KP_Home && sym <= FcitxKey_KP_Delete)) {
-        // Enter/newline breaks the immediate-commit rewrite context; do not
-        // reuse the last word across message boundaries.
-        if (sym == FcitxKey_Return || sym == FcitxKey_KP_Enter) {
-            lastImmediateWord_.clear();
-            lastImmediateWordCharCount_ = 0;
-            recordNextCommitAsImmediateWord_ = false;
-            lastSurroundingRebuildWasStale_ = false;
-            firefoxCursorOffsetFromEnd_ = 0;
-        }
-        // Navigation/control keys break forward-typing flow in Firefox.
-        // Clear internal state so we don't incorrectly rewrite at new cursor position.
-        if (isFirefox()) {
-            FCITX_UNIKEY_DEBUG() << "[preedit] Firefox navigation key, clearing internal state";
-            lastImmediateWord_.clear();
-            lastImmediateWordCharCount_ = 0;
-        }
+        // Any navigation, control key, or shortcut (like Ctrl+A) breaks the
+        // immediate editing context. handleIgnoredKey() will clear the state.
         handleIgnoredKey();
         return;
     }
@@ -633,13 +619,6 @@ void UnikeyState::preedit(KeyEvent &keyEvent, bool allowImmediateCommitForThisKe
     } // end capture printable char
 
     // non process key
-    // Non-ASCII keys (outside printable range) break forward-typing in Firefox.
-    // Clear internal state to avoid incorrect rewrites.
-    if (isFirefox() && (sym < FcitxKey_space || sym > FcitxKey_asciitilde)) {
-        FCITX_UNIKEY_DEBUG() << "[preedit] Firefox non-ASCII key " << sym << ", clearing internal state";
-        lastImmediateWord_.clear();
-        lastImmediateWordCharCount_ = 0;
-    }
     handleIgnoredKey();
 }
 
@@ -650,6 +629,14 @@ void UnikeyState::handleIgnoredKey() {
     // This is not an immediate-commit keystroke. Avoid using it as a rewrite
     // source.
     recordNextCommitAsImmediateWord_ = false;
+
+    // Since we are passing an ignored key to the application, the cursor context
+    // or text content may change unpredictably. Clear immediate word tracking.
+    lastImmediateWord_.clear();
+    lastImmediateWordCharCount_ = 0;
+    lastSurroundingRebuildWasStale_ = false;
+    firefoxCursorOffsetFromEnd_ = 0;
+
     commit();
 }
 
