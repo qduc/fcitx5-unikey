@@ -278,6 +278,15 @@ void UnikeyState::preedit(KeyEvent &keyEvent, bool allowImmediateCommitForThisKe
         sym == FcitxKey_KP_Enter ||
         (sym >= FcitxKey_Home && sym <= FcitxKey_Insert) ||
         (sym >= FcitxKey_KP_Home && sym <= FcitxKey_KP_Delete)) {
+        // Enter/newline breaks the immediate-commit rewrite context; do not
+        // reuse the last word across message boundaries.
+        if (sym == FcitxKey_Return || sym == FcitxKey_KP_Enter) {
+            lastImmediateWord_.clear();
+            lastImmediateWordCharCount_ = 0;
+            recordNextCommitAsImmediateWord_ = false;
+            lastSurroundingRebuildWasStale_ = false;
+            firefoxCursorOffsetFromEnd_ = 0;
+        }
         // Navigation/control keys break forward-typing flow in Firefox.
         // Clear internal state so we don't incorrectly rewrite at new cursor position.
         if (isFirefox()) {
