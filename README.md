@@ -33,11 +33,14 @@ This project requires a modern Linux environment with Fcitx 5 development header
 
 ### Verified Distributions
 - **Arch Linux**: Builds successfully with latest `fcitx5` (5.1.17+).
-- **Debian Testing/Unstable**: Known to work with recent versions.
+- **Debian Testing/Unstable (Sid)**: Verified to work with Fcitx 5 (5.1.17).
 - **Fedora**: Supported.
 - *Note: Ubuntu 24.04 and earlier may require manual backporting of Fcitx 5 as they ship older versions (5.1.7).*
 
 ## Build and Install
+
+> [!IMPORTANT]
+> This package provides the same components as the official `fcitx5-unikey`. To avoid file conflicts and ensure correct behavior, you **must uninstall the official package** before installing this fork.
 
 ### Dependencies
 
@@ -48,7 +51,12 @@ sudo pacman -S base-devel cmake extra-cmake-modules gettext fcitx5 fcitx5-qt qt6
 
 On Debian/Ubuntu (Requires fcitx5 >= 5.1.13):
 ```bash
-sudo apt install build-essential cmake extra-cmake-modules gettext libfcitx5core-dev libfcitx5utils-dev fcitx5-modules-dev libfcitx5-qt6-dev libfcitx5qt6widgetsaddons-dev qt6-base-dev
+sudo apt install build-essential cmake extra-cmake-modules gettext libfcitx5core-dev libfcitx5utils-dev fcitx5-modules-dev libfcitx5-qt6-dev qt6-base-dev
+```
+
+On Fedora:
+```bash
+sudo dnf install gcc-c++ cmake extra-cmake-modules gettext fcitx5-devel fcitx5-qt-devel qt6-qtbase-devel
 ```
 
 ### Building
