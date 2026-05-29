@@ -54,26 +54,26 @@ bool shouldRunCase(const CaseSelection &sel, int id) {
 void printCases() {
     // Keep this list in sync with the numbered blocks below.
     std::cout << "Available cases for testsurroundingtext:\n";
-    std::cout << "  1: Immediate commit rewrite from ASCII surrounding\n";
-    std::cout << "  2: Unicode rebuild (Vietnamese char in surrounding)\n";
+    std::cout << "  1: Immediate commit builds word from internal history\n";
+    std::cout << "  2: Immediate commit rewrites Vietnamese char internally\n";
     std::cout << "  3: Immediate commit with proper surrounding updates\n";
     std::cout << "  4: Stale/empty surrounding fallback (Firefox-like)\n";
     std::cout << "  5: Truncated surrounding word uses lastImmediateWord fallback\n";
-    std::cout << "  6: Surrounding has extra prefix; trust surrounding for tone\n";
-    std::cout << "  7: Active selection skips rebuild/delete and just commits\n";
+    std::cout << "  6: Immediate commit applies tone to internally-built word\n";
+    std::cout << "  7: Active selection in surrounding is ignored in immediate mode\n";
     std::cout << "  8: ModifySurroundingText with cursor==0 should not crash\n";
     std::cout << "  9: Single failure should NOT mark surrounding unreliable\n";
-    std::cout << " 10: Multiple consecutive failures should mark as unreliable\n";
-    std::cout << " 11: Focus change (reset) clears unreliable state\n";
-    std::cout << " 12: Consecutive successes recover from unreliable\n";
+    std::cout << " 10: ImmediateCommit stays internal when surrounding stays stale\n";
+    std::cout << " 11: Focus change (reset) clears the internal session\n";
+    std::cout << " 12: ImmediateCommit unaffected by stale surrounding; reset starts fresh\n";
     std::cout << " 13: ModifySurroundingText with Vietnamese text present\n";
     std::cout << " 14: ImmediateCommit takes precedence over ModifySurroundingText\n";
     std::cout << " 15: Cursor at word boundary: no rebuild\n";
-    std::cout << " 16: Long word near MAX_LENGTH_VNWORD\n";
-    std::cout << " 17: Mixed ASCII + Vietnamese in surrounding\n";
+    std::cout << " 16: Long word built from internal history\n";
+    std::cout << " 17: Foreign mixed-content surrounding is ignored\n";
     std::cout << " 18: Cursor at beginning of document\n";
     std::cout << " 19: Rapid keystrokes with stale surrounding\n";
-    std::cout << " 20: Backspace clears immediate word history\n";
+    std::cout << " 20: Backspace edits internal immediate word history\n";
     std::cout << " 21: ModifySurroundingText rebuilds preedit when cursor moves back\n";
     std::cout << " 22: Control characters (newline, tab) are rejected from rebuild\n";
     std::cout << " 23: Raw ASCII pasted from surrounding survives plain space\n";
@@ -81,6 +81,10 @@ void printCases() {
     std::cout << " 25: Immediate commit double-tap to raw, then space\n";
     std::cout << " 26: Immediate commit pasted raw word then space\n";
     std::cout << " 27: Double-tap undo survives stale surrounding\n";
+    std::cout << " 28: Immediate commit keeps raw VNI word with repeated tone digits\n";
+    std::cout << " 29: Immediate commit keeps raw Telex word with repeated tone keys\n";
+    std::cout << " 30: Immediate commit without surrounding capability avoids whole-word duplication\n";
+    std::cout << " 31: ImmediateCommit ignores obviously stale surrounding text\n";
 }
 
 void announceCase(int id) {
@@ -132,39 +136,60 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
         base.setValueByPath("InputMethod", "VNI");
         base.setValueByPath("OutputCharset", "Unicode");
 
-        // --- Case 1: Immediate commit rewrite from ASCII surrounding ---
+        // --- Case 1: Immediate commit builds the word from internal history ---
+        // ImmediateCommit is internal-only: it never reads the surrounding
+        // snapshot, so the word must be composed entirely from typed keystrokes.
+        // Foreign surrounding text is present but must be ignored.
         if (shouldRunCase(selCopy, 1)) {
             announceCase(1);
-            FCITX_INFO() << "testsurroundingtext: Case 1 - Immediate commit rewrite from ASCII surrounding";
+            FCITX_INFO() << "testsurroundingtext: Case 1 - Immediate commit builds word from internal history";
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "True");
             cfg.setValueByPath("ModifySurroundingText", "False");
             configureUnikey(unikey, cfg);
 
             ic->reset();
-            ic->surroundingText().setText("nga", 3, 3);
+            // Obviously foreign surrounding text must be ignored entirely.
+            ic->surroundingText().setText("XYZ", 3, 3);
             ic->updateSurroundingText();
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("ngả");
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("n");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("n"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("ng");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("g"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("nga");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
             // VNI: 3 = hỏi (ả).
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("ngả");
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("3"), false);
         }
 
-        // --- Case 2: Unicode rebuild (Vietnamese char in surrounding) ---
+        // --- Case 2: Immediate commit rewrites a Vietnamese char internally ---
+        // Build "ngả" purely from internal keystrokes, then retone it to "ngá".
+        // No surrounding text is consulted at any point.
         if (shouldRunCase(selCopy, 2)) {
             announceCase(2);
-            FCITX_INFO() << "testsurroundingtext: Case 2 - Unicode rebuild (Vietnamese char in surrounding)";
+            FCITX_INFO() << "testsurroundingtext: Case 2 - Immediate commit rewrites Vietnamese char internally";
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "True");
             cfg.setValueByPath("ModifySurroundingText", "False");
             configureUnikey(unikey, cfg);
 
             ic->reset();
-            ic->surroundingText().setText("ngả", 3, 3);
+            ic->surroundingText().setText("", 0, 0);
             ic->updateSurroundingText();
 
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("n");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("n"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("ng");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("g"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("nga");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
+            // VNI: 3 = hỏi (ả).
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("ngả");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("3"), false);
+            // VNI: 1 = sắc (á); rewrites the existing Vietnamese char.
             testfrontend->call<ITestFrontend::pushCommitExpectation>("ngá");
-            // VNI: 1 = sắc (á).
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("1"), false);
         }
 
@@ -229,10 +254,12 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("1"), false);
         }
 
-        // --- Case 5: Truncated surrounding word should use lastImmediateWord fallback ---
+        // --- Case 5: Truncated/stale surrounding does not derail internal composition ---
+        // The app reports only a prefix of the word; immediate mode ignores it
+        // and keeps composing from internal history.
         if (shouldRunCase(selCopy, 5)) {
             announceCase(5);
-            FCITX_INFO() << "testsurroundingtext: Case 5 - Truncated surrounding word uses lastImmediateWord fallback";
+            FCITX_INFO() << "testsurroundingtext: Case 5 - Truncated/stale surrounding ignored; internal composition continues";
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "True");
             cfg.setValueByPath("ModifySurroundingText", "False");
@@ -249,7 +276,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             testfrontend->call<ITestFrontend::pushCommitExpectation>("en");
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("n"), false);
 
-            // Stale snapshot only shows a prefix of the last committed word.
+            // Stale snapshot only shows a prefix of the word; it is ignored.
             ic->surroundingText().setText("e", 1, 1);
             ic->updateSurroundingText();
 
@@ -257,10 +284,13 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
         }
 
-        // --- Case 6: Surrounding has extra prefix; trust surrounding for tone placement ---
+        // --- Case 6: Immediate commit applies tone to the internally-built word ---
+        // Build "qua" entirely from keystrokes, then apply a tone. A longer,
+        // conflicting surrounding word is reported by the app but must be
+        // ignored: the tone is placed using internal history only.
         if (shouldRunCase(selCopy, 6)) {
             announceCase(6);
-            FCITX_INFO() << "testsurroundingtext: Case 6 - Surrounding has extra prefix; trust surrounding for tone";
+            FCITX_INFO() << "testsurroundingtext: Case 6 - Immediate commit applies tone to internal word";
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "True");
             cfg.setValueByPath("ModifySurroundingText", "False");
@@ -270,36 +300,47 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             ic->surroundingText().setText("", 0, 0);
             ic->updateSurroundingText();
 
-            // Build lastImmediateWord = "ua".
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("u");
+            // Build "qua" from internal keystrokes.
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("q");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("q"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("qu");
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("u"), false);
-
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("ua");
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("qua");
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
 
-            // Now app reports a longer surrounding word: "qua".
-            ic->surroundingText().setText("qua", 3, 3);
+            // App reports a conflicting surrounding word; it must be ignored.
+            ic->surroundingText().setText("zzzqua", 6, 6);
             ic->updateSurroundingText();
 
+            // VNI: 1 = sắc (á).
             testfrontend->call<ITestFrontend::pushCommitExpectation>("quá");
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("1"), false);
         }
 
-        // --- Case 7: Active selection should skip rebuild/delete and just commit ---
+        // --- Case 7: Active selection in surrounding is ignored in immediate mode ---
+        // Immediate-commit never reads surrounding text, so it cannot (and does
+        // not) react to an app-reported selection. Composition continues purely
+        // from internal history: after "e", typing "x" extends to "ex".
         if (shouldRunCase(selCopy, 7)) {
             announceCase(7);
-            FCITX_INFO() << "testsurroundingtext: Case 7 - Active selection skips rebuild/delete and just commits";
+            FCITX_INFO() << "testsurroundingtext: Case 7 - Active selection in surrounding is ignored";
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "True");
             cfg.setValueByPath("ModifySurroundingText", "False");
             configureUnikey(unikey, cfg);
 
             ic->reset();
-            // Text: "example"; cursor after 'e' (1), selection "xample" (1..7).
+            ic->surroundingText().setText("", 0, 0);
+            ic->updateSurroundingText();
+
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("e");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("e"), false);
+
+            // App reports an active selection "xample"; immediate mode ignores it.
             ic->surroundingText().setText("example", 1, 7);
             ic->updateSurroundingText();
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("x");
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("ex");
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("x"), false);
         }
 
@@ -357,12 +398,13 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("1"), false);
         }
 
-        // --- Case 10: Multiple consecutive failures should mark as unreliable ---
-        // After kSurroundingFailureThreshold (2) consecutive failures without
-        // any successful surrounding reads, the system should fall back to preedit.
+        // --- Case 10: ImmediateCommit stays internal when surrounding stays stale ---
+        // ImmediateCommit no longer marks surrounding text as unreliable and
+        // falls back to preedit. It keeps composing from its own keystroke
+        // history even if the app keeps reporting stale/empty surrounding text.
         if (shouldRunCase(selCopy, 10)) {
             announceCase(10);
-            FCITX_INFO() << "testsurroundingtext: Case 10 - Multiple consecutive failures should mark as unreliable";
+            FCITX_INFO() << "testsurroundingtext: Case 10 - ImmediateCommit stays internal with stale surrounding";
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "True");
             cfg.setValueByPath("ModifySurroundingText", "False");
@@ -380,18 +422,13 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             testfrontend->call<ITestFrontend::pushCommitExpectation>("to");
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("o"), false);
 
-            // Still empty (failure 2 - threshold reached).
+            // Still empty; the internal session remains authoritative.
             testfrontend->call<ITestFrontend::pushCommitExpectation>("toi");
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("i"), false);
 
-            // After threshold, the system should be in unreliable mode and
-            // fall back to preedit. We need to press space to commit in preedit.
-            // NOTE: Once in preedit mode, keystrokes don't immediately commit.
-            // The 's' key will be added to preedit (building "tois" internally),
-            // then we need Return or space to commit.
+            // The next key still commits immediately from internal state.
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("tois");
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("s"), false);
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("s");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("Return"), false);
         }
 
         // --- Case 11: Focus change (reset) should clear unreliable state ---
@@ -399,13 +436,13 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
         // giving the new context a fresh start.
         if (shouldRunCase(selCopy, 11)) {
             announceCase(11);
-            FCITX_INFO() << "testsurroundingtext: Case 11 - Focus change (reset) clears unreliable state";
+            FCITX_INFO() << "testsurroundingtext: Case 11 - Focus change (reset) clears the internal session";
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "True");
             cfg.setValueByPath("ModifySurroundingText", "False");
             configureUnikey(unikey, cfg);
 
-            // First, trigger unreliable state by consecutive failures.
+            // Build an internal session.
             ic->reset();
             ic->surroundingText().setText("", 0, 0);
             ic->updateSurroundingText();
@@ -419,26 +456,34 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             testfrontend->call<ITestFrontend::pushCommitExpectation>("xyz");
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("z"), false);
 
-            // Now simulate focus change (triggers InputContextReset).
-            // This internally calls clearImmediateCommitHistory() which should
-            // reset surroundingTextUnreliable_.
+            // Simulate focus change (triggers InputContextReset), which clears
+            // the internal immediate-commit session.
             ic->reset();
 
-            // With valid surrounding text, immediate commit should work again.
+            // Foreign surrounding text is present but ignored. The fresh word is
+            // built from internal keystrokes only; because the session was
+            // cleared, the first key starts a brand-new word ("q", not "xyzq").
             ic->surroundingText().setText("qua", 3, 3);
             ic->updateSurroundingText();
 
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("q");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("q"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("qu");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("u"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("qua");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
+            // VNI: 1 = sắc (á).
             testfrontend->call<ITestFrontend::pushCommitExpectation>("quá");
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("1"), false);
         }
 
-        // --- Case 12: Consecutive successes should recover from unreliable ---
-        // If surrounding becomes reliable after being marked unreliable,
-        // kSurroundingRecoveryThreshold (3) successful operations should
-        // restore immediate commit mode.
+        // --- Case 12: ImmediateCommit is unaffected by stale surrounding; reset starts fresh ---
+        // There is no unreliable-surrounding state in ImmediateCommit anymore.
+        // Stale surrounding text does not disable immediate commits, and after a
+        // reset the next word is composed purely from internal keystrokes.
         if (shouldRunCase(selCopy, 12)) {
             announceCase(12);
-            FCITX_INFO() << "testsurroundingtext: Case 12 - Consecutive successes recover from unreliable";
+            FCITX_INFO() << "testsurroundingtext: Case 12 - ImmediateCommit unaffected by stale surrounding";
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "True");
             cfg.setValueByPath("ModifySurroundingText", "False");
@@ -448,7 +493,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             ic->surroundingText().setText("", 0, 0);
             ic->updateSurroundingText();
 
-            // Trigger failures to enter unreliable state.
+            // Stale surrounding text does not disable immediate commit.
             testfrontend->call<ITestFrontend::pushCommitExpectation>("m");
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("m"), false);
 
@@ -458,35 +503,22 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             testfrontend->call<ITestFrontend::pushCommitExpectation>("man");
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("n"), false);
 
-            // Now in preedit mode. Commit current preedit.
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("manh");
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("h"), false);
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("h");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("Return"), false);
 
-            // Now start providing valid surrounding text for recovery.
-            // We need 3 consecutive successful rebuilds.
-            ic->surroundingText().setText("ba", 2, 2);
-            ic->updateSurroundingText();
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("s"), false);
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("s");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("Return"), false);
-
-            ic->surroundingText().setText("ca", 2, 2);
-            ic->updateSurroundingText();
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("s"), false);
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("s");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("Return"), false);
-
-            ic->surroundingText().setText("da", 2, 2);
-            ic->updateSurroundingText();
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("s"), false);
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("s");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("Return"), false);
-
-            // After 3 successes, immediate commit should be restored.
+            // A reset clears the internal session. Stale surrounding text is
+            // present but ignored; the next word is built from keystrokes only.
+            ic->reset();
             ic->surroundingText().setText("nga", 3, 3);
             ic->updateSurroundingText();
 
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("n");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("n"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("ng");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("g"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("nga");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
+            // VNI: 3 = hỏi (ả).
             testfrontend->call<ITestFrontend::pushCommitExpectation>("ngả");
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("3"), false);
         }
@@ -565,44 +597,64 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
         }
 
-        // --- Case 16: Very long word approaching MAX_LENGTH_VNWORD ---
-        // Ensure the rebuild logic handles long words correctly.
+        // --- Case 16: Longer word built entirely from internal history ---
+        // Ensure immediate commit handles longer words composed from keystrokes.
         if (shouldRunCase(selCopy, 16)) {
             announceCase(16);
-            FCITX_INFO() << "testsurroundingtext: Case 16 - Long word near MAX_LENGTH_VNWORD";
+            FCITX_INFO() << "testsurroundingtext: Case 16 - Long word built from internal history";
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "True");
             cfg.setValueByPath("ModifySurroundingText", "False");
             configureUnikey(unikey, cfg);
 
             ic->reset();
-            // 15-character word (MAX_LENGTH_VNWORD is around 18)
-            ic->surroundingText().setText("nghien", 6, 6);
+            ic->surroundingText().setText("", 0, 0);
             ic->updateSurroundingText();
 
-            // Add tone - should rebuild and work correctly
-            testfrontend->call<ITestFrontend::pushCommitExpectation>(
-                "nghiên");
-            // VNI: 6 adds circumflex to 'e'
+            // Type "nghien" one key at a time.
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("n");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("n"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("ng");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("g"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("ngh");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("h"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("nghi");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("i"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("nghie");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("e"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("nghien");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("n"), false);
+
+            // VNI: 6 adds circumflex to 'e'.
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("nghiên");
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("6"), false);
         }
 
-        // --- Case 17: Mixed ASCII and Vietnamese in surrounding ---
-        // Ensure proper word boundary detection with mixed content.
+        // --- Case 17: Foreign mixed-content surrounding is ignored ---
+        // Even when the app reports preceding mixed ASCII + Vietnamese content,
+        // immediate commit composes the word from internal keystrokes only.
         if (shouldRunCase(selCopy, 17)) {
             announceCase(17);
-            FCITX_INFO() << "testsurroundingtext: Case 17 - Mixed ASCII + Vietnamese in surrounding";
+            FCITX_INFO() << "testsurroundingtext: Case 17 - Foreign mixed-content surrounding is ignored";
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "True");
             cfg.setValueByPath("ModifySurroundingText", "False");
             configureUnikey(unikey, cfg);
 
             ic->reset();
-            // Vietnamese word followed by cursor
-            ic->surroundingText().setText("Việt Nam toi", 12, 12);
+            // Foreign mixed content present in the field; must be ignored.
+            ic->surroundingText().setText("Việt Nam ", 9, 9);
             ic->updateSurroundingText();
 
-            // Add tone to "toi" -> "tôi"
+            // Build "toi" from internal keystrokes.
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("t");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("t"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("to");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("o"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("toi");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("i"), false);
+
+            // VNI: 6 adds circumflex to 'o' -> "tôi".
             testfrontend->call<ITestFrontend::pushCommitExpectation>("tôi");
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("6"), false);
         }
@@ -657,33 +709,33 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("6"), false);
         }
 
-        // --- Case 20: Backspace clears immediate word history ---
-        // After explicit deletion, immediate word tracking should be cleared.
+        // --- Case 20: Backspace edits the internal immediate word history ---
+        // Backspace rewrites from the internally tracked word without reading
+        // surrounding text as authoritative state.
         if (shouldRunCase(selCopy, 20)) {
             announceCase(20);
-            FCITX_INFO() << "testsurroundingtext: Case 20 - Backspace clears immediate word history";
+            FCITX_INFO() << "testsurroundingtext: Case 20 - Backspace edits immediate word history";
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "True");
             cfg.setValueByPath("ModifySurroundingText", "False");
             configureUnikey(unikey, cfg);
 
             ic->reset();
-            ic->surroundingText().setText("a", 1, 1);
+            ic->surroundingText().setText("", 0, 0);
             ic->updateSurroundingText();
 
-            // Type 'b'
+            // Build "ab" from internal keystrokes.
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("a");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
             testfrontend->call<ITestFrontend::pushCommitExpectation>("ab");
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("b"), false);
 
-            // Now backspace
-            ic->surroundingText().setText("ab", 2, 2);
-            ic->updateSurroundingText();
+            // Backspace edits the internally tracked word: "ab" -> "a".
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("a");
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("BackSpace"),
                                                         false);
 
-            // Type new character - should start fresh context
-            ic->surroundingText().setText("a", 1, 1);
-            ic->updateSurroundingText();
+            // Continue editing the internally tracked word: VNI 1 = sắc.
             testfrontend->call<ITestFrontend::pushCommitExpectation>("á");
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("1"), false);
         }
@@ -818,7 +870,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             ic->surroundingText().setText("c", 1, 1);
             ic->updateSurroundingText();
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("a");
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("ca");
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
             ic->surroundingText().setText("ca", 2, 2);
             ic->updateSurroundingText();
@@ -881,7 +933,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             ic->surroundingText().setText("c", 1, 1);
             ic->updateSurroundingText();
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("a");
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("ca");
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
             ic->surroundingText().setText("ca", 2, 2);
             ic->updateSurroundingText();
@@ -895,6 +947,105 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             // Must undo to raw "ca1" (not re-apply the tone to "cá").
             testfrontend->call<ITestFrontend::pushCommitExpectation>("ca1");
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("1"), false);
+        }
+
+        // --- Case 28: Immediate commit keeps raw VNI word with repeated tone digits ---
+        // A pasted raw word like "ca1111" should not be rewritten when Space is pressed.
+        if (shouldRunCase(selCopy, 28)) {
+            announceCase(28);
+            FCITX_INFO() << "testsurroundingtext: Case 28 - Immediate commit keeps raw VNI word with repeated tone digits";
+            RawConfig cfg = base;
+            cfg.setValueByPath("ImmediateCommit", "True");
+            cfg.setValueByPath("ModifySurroundingText", "False");
+            cfg.setValueByPath("InputMethod", "VNI");
+            configureUnikey(unikey, cfg);
+
+            ic->reset();
+            ic->surroundingText().setText("ca1111", 6, 6);
+            ic->updateSurroundingText();
+
+            testfrontend->call<ITestFrontend::pushCommitExpectation>(" ");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
+        }
+
+        // --- Case 29: Immediate commit keeps raw Telex word with repeated tone keys ---
+        // A pasted raw word like "cassss" should not be rewritten when Space is pressed.
+        if (shouldRunCase(selCopy, 29)) {
+            announceCase(29);
+            FCITX_INFO() << "testsurroundingtext: Case 29 - Immediate commit keeps raw Telex word with repeated tone keys";
+            RawConfig cfg = base;
+            cfg.setValueByPath("ImmediateCommit", "True");
+            cfg.setValueByPath("ModifySurroundingText", "False");
+            cfg.setValueByPath("InputMethod", "Telex");
+            configureUnikey(unikey, cfg);
+
+            ic->reset();
+            ic->surroundingText().setText("cassss", 6, 6);
+            ic->updateSurroundingText();
+
+            testfrontend->call<ITestFrontend::pushCommitExpectation>(" ");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
+        }
+
+        // --- Case 30: No surrounding capability should not duplicate append-only typing ---
+        if (shouldRunCase(selCopy, 30)) {
+            announceCase(30);
+            FCITX_INFO() << "testsurroundingtext: Case 30 - ImmediateCommit without surrounding capability avoids duplication";
+            RawConfig cfg = base;
+            cfg.setValueByPath("ImmediateCommit", "True");
+            cfg.setValueByPath("ModifySurroundingText", "False");
+            configureUnikey(unikey, cfg);
+
+            ic->reset();
+            ic->setCapabilityFlags(CapabilityFlag::NoFlag);
+
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("e");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("e"), false);
+
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("x");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("x"), false);
+
+            ic->setCapabilityFlags(CapabilityFlag::SurroundingText);
+        }
+
+        // --- Case 31: ImmediateCommit ignores obviously stale surrounding text ---
+        // Regression: with ImmediateCommit on, an app that reports wildly stale
+        // or incorrect surrounding text (and keeps lying between keystrokes)
+        // must not influence the committed result. The output is driven solely
+        // by internal keystroke history. Under the old surrounding-bootstrap
+        // behavior the lie below ("zzzzzzzz") would have corrupted the result.
+        if (shouldRunCase(selCopy, 31)) {
+            announceCase(31);
+            FCITX_INFO() << "testsurroundingtext: Case 31 - ImmediateCommit ignores obviously stale surrounding";
+            RawConfig cfg = base;
+            cfg.setValueByPath("ImmediateCommit", "True");
+            cfg.setValueByPath("ModifySurroundingText", "False");
+            configureUnikey(unikey, cfg);
+
+            ic->reset();
+            // The app lies: claims the field already holds a long unrelated word.
+            ic->surroundingText().setText("zzzzzzzz", 8, 8);
+            ic->updateSurroundingText();
+
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("t");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("t"), false);
+
+            // Keep feeding garbage surrounding between keystrokes.
+            ic->surroundingText().setText("garbage", 7, 7);
+            ic->updateSurroundingText();
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("to");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("o"), false);
+
+            ic->surroundingText().setText("nonsense", 8, 8);
+            ic->updateSurroundingText();
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("toi");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("i"), false);
+
+            // VNI: 6 adds circumflex to 'o' -> "tôi", from internal history only.
+            ic->surroundingText().setText("stillwrong", 10, 10);
+            ic->updateSurroundingText();
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("tôi");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("6"), false);
         }
 
         instance->deactivate();

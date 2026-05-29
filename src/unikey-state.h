@@ -12,6 +12,7 @@
 #include <fcitx-utils/keysym.h>
 #include "unikeyinputcontext.h"
 #include <string>
+#include <vector>
 
 namespace fcitx {
 
@@ -20,6 +21,11 @@ class InputContext;
 
 class UnikeyState final : public InputContextProperty {
 public:
+    struct ImmediateCommitKeyStroke {
+        KeySym sym = FcitxKey_None;
+        bool passThrough = false;
+    };
+
     UnikeyState(UnikeyEngine *engine, InputContext *ic);
     ~UnikeyState() = default;
 
@@ -79,6 +85,15 @@ private:
     KeySym lastShiftPressed_ = FcitxKey_None;
 
     bool restorePreeditToRawKeystrokesIfAvailable();
+    void clearImmediateCommitSession();
+    bool restoreImmediateCommitSession();
+    bool canRewriteImmediateCommit() const;
+    void commitImmediateDiff(const std::string &oldWord,
+                             const std::string &newWord,
+                             KeySym fallbackSym = FcitxKey_None);
+    void updateImmediateCommitSessionFromPreedit(int forcePassThroughIndex = -1);
+    bool hasImmediateCommitSession() const;
+    void replayImmediateCommitKeyStroke(const ImmediateCommitKeyStroke &stroke);
 
     // DEFERRED-DECISION flag. True when the visible preedit is a re-converted
     // view of external raw-ASCII text pulled from surrounding text. Rebuild
@@ -102,6 +117,13 @@ private:
     // Example: "ăn" with offset 0 → cursor after "n"
     //          "ăn" with offset 1 → cursor after "ă"
     size_t firefoxCursorOffsetFromEnd_ = 0;
+
+    // ImmediateCommit-owned current word. This lets ImmediateCommit rewrite
+    // text from internal keystroke history instead of app-reported surrounding
+    // text, which is unreliable in many applications.
+    std::string immediateCommitWord_;
+    size_t immediateCommitWordCharCount_ = 0;
+    std::vector<ImmediateCommitKeyStroke> immediateCommitKeyStrokes_;
 };
 
 } // namespace fcitx

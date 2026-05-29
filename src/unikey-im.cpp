@@ -203,7 +203,13 @@ void UnikeyEngine::keyEvent(const InputMethodEntry & /*entry*/,
                             KeyEvent &keyEvent) {
     auto *ic = keyEvent.inputContext();
     auto *state = ic->propertyFor(&factory_);
-    state->rebuildFromSurroundingText();
+    // Immediate-commit is a hard internal-only mode: it owns the current word
+    // entirely from internal keystroke history and never consults the
+    // application's surrounding-text snapshot. Only non-immediate modes
+    // (including ModifySurroundingText) probe surrounding text here.
+    if (!state->immediateCommitMode()) {
+        state->rebuildFromSurroundingText();
+    }
     state->keyEvent(keyEvent);
 }
 

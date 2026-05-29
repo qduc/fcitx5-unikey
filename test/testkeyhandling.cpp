@@ -70,6 +70,7 @@ void printCases() {
     std::cout << " 15: VNI double-typing undo survives space\n";
     std::cout << " 16: Telex double-typing undo survives space\n";
     std::cout << " 17: VNI digit before space commits converted input\n";
+    std::cout << " 18: Immediate commit preserves raw word-initial w replay when ProcessWAtBegin=False\n";
 }
 
 void announceCase(int id) {
@@ -524,6 +525,29 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
 
             testfrontend->call<ITestFrontend::pushCommitExpectation>("cá ");
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
+        }
+
+        // --- Test: Immediate commit should preserve pass-through W replay ---
+        if (shouldRunCase(selCopy, 18)) {
+            announceCase(18);
+            FCITX_INFO() << "testkeyhandling: Case 18 - Immediate commit preserves raw W replay";
+            config.setValueByPath("ImmediateCommit", "True");
+            config.setValueByPath("InputMethod", "Telex");
+            config.setValueByPath("ProcessWAtBegin", "False");
+            setTestConfig(unikey, config);
+
+            ic->reset();
+            ic->surroundingText().setText("", 0, 0);
+            ic->updateSurroundingText();
+
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("w");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("w"), false);
+
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("wa");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
+
+            config.setValueByPath("ProcessWAtBegin", "True");
+            setTestConfig(unikey, config);
         }
 
         instance->deactivate();

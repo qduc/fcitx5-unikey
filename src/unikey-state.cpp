@@ -84,7 +84,12 @@ void UnikeyState::keyEvent(KeyEvent &keyEvent) {
     // composition and insert a blank, never pull the previous word back from
     // surrounding text to re-run Vietnamese conversion. Skip the rebuild for
     // space so it never re-feeds the prior word into the Unikey engine.
-    if (keyEvent.key().isSimple() &&
+    //
+    // In immediate-commit mode we never rebuild from surrounding text at all
+    // (no prefix bootstrap, no cursor recovery, no prefix reconstruction):
+    // the current word is owned entirely by internal keystroke history. Only
+    // non-immediate modes consult the application snapshot via rebuildPreedit().
+    if (!immediateCommitMode() && keyEvent.key().isSimple() &&
         keyEvent.rawKey().sym() != FcitxKey_space) {
         rebuildPreedit(keyEvent.rawKey().sym());
     }
@@ -126,44 +131,15 @@ bool UnikeyState::immediateCommitMode() const {
         return false;
     }
 
-    // Firefox gets special treatment: enable immediate commit using internal
-    // state tracking even if surrounding text is unreliable. This bypasses
-    // Firefox's buggy Wayland surrounding text implementation.
-    if (isFirefox()) {
-        if (*this->engine_->config().oc != UkConv::XUTF8) {
-            FCITX_UNIKEY_DEBUG() << "[immediateCommitMode] Firefox: charset not UTF-8";
-            return false;
-        }
-        if (!ic_->capabilityFlags().test(CapabilityFlag::SurroundingText)) {
-            FCITX_UNIKEY_DEBUG() << "[immediateCommitMode] Firefox: no surrounding capability";
-            return false;
-        }
-        FCITX_UNIKEY_DEBUG() << "[immediateCommitMode] ENABLED for Firefox (internal state mode)";
-        return true;
-    }
-
-    if (isUnsupportedSurroundingApp()) {
-        FCITX_UNIKEY_DEBUG() << "[immediateCommitMode] Disabled for unsupported app";
-        return false;
-    }
-
-    if (surroundingTextUnreliable_) {
-        FCITX_UNIKEY_DEBUG()
-            << "[immediateCommitMode] Surrounding text marked unreliable; "
-               "falling back to preedit";
-        return false;
-    }
-    // This mode relies on reading and modifying surrounding text.
+    // ImmediateCommit owns the current word internally and does not depend on
+    // app-reported surrounding text. It only needs UTF-8 output so internal
+    // character-count based rewrites are well defined.
     if (*this->engine_->config().oc != UkConv::XUTF8) {
         FCITX_UNIKEY_DEBUG() << "[immediateCommitMode] Output charset is not XUTF8, is: "
                              << static_cast<int>(*this->engine_->config().oc);
         return false;
     }
-    if (!ic_->capabilityFlags().test(CapabilityFlag::SurroundingText)) {
-        FCITX_UNIKEY_DEBUG() << "[immediateCommitMode] SurroundingText capability not available";
-        return false;
-    }
-    FCITX_UNIKEY_DEBUG() << "[immediateCommitMode] ENABLED";
+    FCITX_UNIKEY_DEBUG() << "[immediateCommitMode] ENABLED (internal session mode)";
     return true;
 }
 
@@ -200,6 +176,8 @@ void UnikeyState::reset() {
 }
 
 void UnikeyState::clearImmediateCommitHistory() {
+    clearImmediateCommitSession();
+
     // Clear history used only for immediate-commit surrounding rewrite.
     // This is intended for InputContextReset / focus changes where the
     // surrounding context is no longer related to the last committed word.
@@ -226,6 +204,107 @@ bool UnikeyState::restorePreeditToRawKeystrokesIfAvailable() {
     preeditStr_.clear();
     syncState(FcitxKey_None);
     return true;
+}
+
+void UnikeyState::clearImmediateCommitSession() {
+    immediateCommitWord_.clear();
+    immediateCommitWordCharCount_ = 0;
+    immediateCommitKeyStrokes_.clear();
+}
+
+bool UnikeyState::hasImmediateCommitSession() const {
+    return !immediateCommitKeyStrokes_.empty() || !immediateCommitWord_.empty();
+}
+
+bool UnikeyState::canRewriteImmediateCommit() const {
+    return ic_->capabilityFlags().test(CapabilityFlag::SurroundingText) &&
+           !isUnsupportedSurroundingApp();
+}
+
+void UnikeyState::replayImmediateCommitKeyStroke(const ImmediateCommitKeyStroke &stroke) {
+    if (stroke.passThrough) {
+        uic_.putChar(stroke.sym);
+    } else {
+        uic_.filter(stroke.sym);
+    }
+    keyStrokes_.push_back(stroke.sym);
+    syncState(stroke.sym);
+}
+
+bool UnikeyState::restoreImmediateCommitSession() {
+    if (!hasImmediateCommitSession()) {
+        return false;
+    }
+
+    uic_.resetBuf();
+    preeditStr_.clear();
+    keyStrokes_.clear();
+
+    for (const auto &stroke : immediateCommitKeyStrokes_) {
+        replayImmediateCommitKeyStroke(stroke);
+    }
+    return true;
+}
+
+void UnikeyState::commitImmediateDiff(const std::string &oldWord,
+                                      const std::string &newWord,
+                                      KeySym fallbackSym) {
+    if (oldWord.empty()) {
+        if (!newWord.empty()) {
+            ic_->commitString(newWord);
+        }
+        return;
+    }
+
+    if (!canRewriteImmediateCommit()) {
+        if (newWord.size() >= oldWord.size() &&
+            newWord.compare(0, oldWord.size(), oldWord) == 0) {
+            const std::string suffix = newWord.substr(oldWord.size());
+            if (!suffix.empty()) {
+                ic_->commitString(suffix);
+            }
+            return;
+        }
+
+        if (fallbackSym != FcitxKey_None && fallbackSym != FcitxKey_Shift_L &&
+            fallbackSym != FcitxKey_Shift_R) {
+            ic_->commitString(utf8::UCS4ToUTF8(fallbackSym));
+        }
+        return;
+    }
+
+    const size_t oldLen = utf8::lengthValidated(oldWord);
+    if (oldLen != utf8::INVALID_LENGTH && oldLen > 0) {
+        ic_->deleteSurroundingText(-static_cast<int>(oldLen),
+                                   static_cast<int>(oldLen));
+    }
+
+    if (!newWord.empty()) {
+        ic_->commitString(newWord);
+    }
+}
+
+void UnikeyState::updateImmediateCommitSessionFromPreedit(int forcePassThroughIndex) {
+    const size_t charLen = utf8::lengthValidated(preeditStr_);
+    if (preeditStr_.empty() || charLen == utf8::INVALID_LENGTH) {
+        clearImmediateCommitSession();
+        return;
+    }
+
+    immediateCommitWord_ = preeditStr_;
+    immediateCommitWordCharCount_ = charLen;
+    std::vector<ImmediateCommitKeyStroke> updatedStrokes;
+    updatedStrokes.reserve(keyStrokes_.size());
+    for (size_t i = 0; i < keyStrokes_.size(); ++i) {
+        const auto sym = keyStrokes_[i];
+        const bool preservePassThrough =
+            static_cast<int>(i) == forcePassThroughIndex ||
+            (i < immediateCommitKeyStrokes_.size() &&
+             immediateCommitKeyStrokes_[i].sym == sym &&
+             immediateCommitKeyStrokes_[i].passThrough);
+        updatedStrokes.push_back({sym, preservePassThrough});
+    }
+    immediateCommitKeyStrokes_ = std::move(updatedStrokes);
 }
 
 /**
@@ -311,30 +390,78 @@ void UnikeyState::preedit(KeyEvent &keyEvent, bool allowImmediateCommitForThisKe
         FCITX_INFO() << "[preedit] BackSpace pressed";
         if (immediateCommitMode()) {
             FCITX_INFO() << "[preedit] BackSpace in immediate commit mode";
-            ic_->updateSurroundingText();
-            if (ic_->surroundingText().isValid() &&
-                !ic_->surroundingText().selectedText().empty()) {
-                FCITX_INFO() << "[preedit] Text selected, resetting";
+            if (!canRewriteImmediateCommit()) {
+                clearImmediateCommitSession();
+                reset();
+                return;
+            }
+            if (!hasImmediateCommitSession()) {
                 reset();
                 return;
             }
 
-            // Firefox: let the application handle Backspace to respect selections.
-            if (isFirefox()) {
-                clearImmediateCommitHistory();
-                reset();
-                return;
+            const std::string oldWord = immediateCommitWord_;
+            restoreImmediateCommitSession();
+            auto currentLen = utf8::lengthValidated(preeditStr_);
+            if (currentLen == utf8::INVALID_LENGTH) {
+                currentLen = 0;
             }
 
-            // Default behavior: delete and clear all state
-            FCITX_INFO() << "[preedit] Deleting surrounding text (-1, 1)";
-            ic_->deleteSurroundingText(-1, 1);
+            do {
+                immediateCommitKeyStrokes_.pop_back();
 
-            // After explicit deletion, we should not attempt to rewrite using
-            // the last immediate word.
-            lastImmediateWord_.clear();
-            lastImmediateWordCharCount_ = 0;
-            firefoxCursorOffsetFromEnd_ = 0;
+                if (currentLen == 0) {
+                    break;
+                }
+
+                uic_.resetBuf();
+                std::string tempStr;
+                for (const auto &stroke : immediateCommitKeyStrokes_) {
+                    if (stroke.passThrough) {
+                        uic_.putChar(stroke.sym);
+                    } else {
+                        uic_.filter(stroke.sym);
+                    }
+                    if (uic_.backspaces() > 0) {
+                        int k = uic_.backspaces();
+                        int i;
+                        for (i = tempStr.length() - 1; i >= 0 && k > 0; i--) {
+                            unsigned char c = tempStr.at(i);
+                            if (c < 0x80 || c >= 0xC0) {
+                                k--;
+                            }
+                        }
+                        tempStr.erase(i + 1);
+                    }
+                    if (uic_.bufChars() > 0) {
+                        tempStr.append(reinterpret_cast<const char *>(uic_.buf()),
+                                       uic_.bufChars());
+                    } else if (stroke.sym != FcitxKey_Shift_L &&
+                               stroke.sym != FcitxKey_Shift_R &&
+                               stroke.sym != FcitxKey_None) {
+                        tempStr.append(utf8::UCS4ToUTF8(stroke.sym));
+                    }
+                }
+
+                auto newLen = utf8::lengthValidated(tempStr);
+                if (newLen == utf8::INVALID_LENGTH) {
+                    newLen = 0;
+                }
+
+                if (newLen < currentLen) {
+                    break;
+                }
+            } while (!immediateCommitKeyStrokes_.empty());
+
+            uic_.resetBuf();
+            preeditStr_.clear();
+            keyStrokes_.clear();
+            for (const auto &stroke : immediateCommitKeyStrokes_) {
+                replayImmediateCommitKeyStroke(stroke);
+            }
+
+            commitImmediateDiff(oldWord, preeditStr_);
+            updateImmediateCommitSessionFromPreedit();
 
             reset();
             keyEvent.filterAndAccept();
@@ -436,6 +563,10 @@ void UnikeyState::preedit(KeyEvent &keyEvent, bool allowImmediateCommitForThisKe
                           state.test(KeyState::CapsLock));
 
         const bool immediateCommit = allowImmediateCommitForThisKey;
+        const std::string oldImmediateWord = immediateCommitWord_;
+        if (immediateCommit) {
+            restoreImmediateCommitSession();
+        }
 
         if (rawAsciiRebuiltFromSurrounding_ && sym != FcitxKey_space) {
             // Any non-space printable key edits the word, so drop the deferred
@@ -459,8 +590,12 @@ void UnikeyState::preedit(KeyEvent &keyEvent, bool allowImmediateCommitForThisKe
             if (immediateCommit) {
                 FCITX_UNIKEY_DEBUG() << "[preedit] W at word beginning in immediate commit mode";
                 uic_.putChar(sym);
+                keyStrokes_.push_back(sym);
                 syncState(sym);
-                commit();
+                commitImmediateDiff(oldImmediateWord, preeditStr_, sym);
+                updateImmediateCommitSessionFromPreedit(
+                    static_cast<int>(keyStrokes_.size()) - 1);
+                reset();
                 keyEvent.filterAndAccept();
                 return;
             }
@@ -488,13 +623,22 @@ void UnikeyState::preedit(KeyEvent &keyEvent, bool allowImmediateCommitForThisKe
             // where replay displayed external raw input like "ca1" as converted
             // "cá".
             const bool restoreRaw =
-                !immediateCommit &&
-                (state.test(KeyState::Shift) ||
-                 rawAsciiRebuiltFromSurrounding_);
+                state.test(KeyState::Shift) ||
+                (!immediateCommit && rawAsciiRebuiltFromSurrounding_);
             if (restoreRaw) {
                 restorePreeditToRawKeystrokesIfAvailable();
             }
             rawAsciiRebuiltFromSurrounding_ = false;
+            if (immediateCommit) {
+                if (restoreRaw) {
+                    commitImmediateDiff(oldImmediateWord, preeditStr_);
+                }
+                ic_->commitString(" ");
+                clearImmediateCommitSession();
+                reset();
+                keyEvent.filterAndAccept();
+                return;
+            }
             preeditStr_.append(" ");
             commit();
             keyEvent.filterAndAccept();
@@ -510,120 +654,9 @@ void UnikeyState::preedit(KeyEvent &keyEvent, bool allowImmediateCommitForThisKe
 
         if (immediateCommit) {
             FCITX_UNIKEY_DEBUG() << "[preedit] ImmediateCommit: committing \"" << preeditStr_ << "\"";
-            if (isFirefox() && !lastImmediateWord_.empty()) {
-                auto logSurrounding = [&](const char *tag) {
-                    ic_->updateSurroundingText();
-                    const auto &st = ic_->surroundingText();
-                    if (!st.isValid()) {
-                        FCITX_UNIKEY_DEBUG() << tag << " surrounding invalid";
-                        return;
-                    }
-                    std::string text = st.text();
-                    if (text.size() > 80) {
-                        text.resize(80);
-                        text.append("...");
-                    }
-                    FCITX_UNIKEY_DEBUG() << tag << " text=\"" << text << "\" cursor="
-                                         << st.cursor() << " selection=\""
-                                         << st.selectedText() << "\"";
-                };
-
-                logSurrounding("[firefox-immediate] before");
-                const std::string fullWord = preeditStr_;
-                auto itLast = lastImmediateWord_.begin();
-                auto itFull = fullWord.begin();
-                const auto endLast = lastImmediateWord_.end();
-                const auto endFull = fullWord.end();
-                size_t commonChars = 0;
-                size_t fullByteIndex = 0;
-                while (itLast != endLast && itFull != endFull) {
-                    uint32_t lastChar = 0;
-                    uint32_t fullChar = 0;
-                    auto nextLast = utf8::getNextChar(itLast, endLast, &lastChar);
-                    auto nextFull = utf8::getNextChar(itFull, endFull, &fullChar);
-                    if (lastChar == utf8::INVALID_CHAR ||
-                        lastChar == utf8::NOT_ENOUGH_SPACE ||
-                        fullChar == utf8::INVALID_CHAR ||
-                        fullChar == utf8::NOT_ENOUGH_SPACE) {
-                        break;
-                    }
-                    if (lastChar != fullChar) {
-                        break;
-                    }
-                    commonChars++;
-                    fullByteIndex = static_cast<size_t>(nextFull - fullWord.begin());
-                    itLast = nextLast;
-                    itFull = nextFull;
-                }
-
-                const size_t fullLen = utf8::lengthValidated(fullWord);
-                const bool endsWithWordBreak =
-                    !fullWord.empty() &&
-                    static_cast<unsigned char>(fullWord.back()) < 0x80 &&
-                    isWordBreakSym(static_cast<unsigned char>(fullWord.back()));
-                if (fullLen != utf8::INVALID_LENGTH) {
-                    if (commonChars == lastImmediateWordCharCount_ &&
-                        fullByteIndex < fullWord.size()) {
-                        const std::string suffix = fullWord.substr(fullByteIndex);
-                        if (endsWithWordBreak) {
-                            lastImmediateWord_.clear();
-                            lastImmediateWordCharCount_ = 0;
-                        } else {
-                            lastImmediateWord_ = fullWord;
-                            lastImmediateWordCharCount_ = static_cast<size_t>(fullLen);
-                        }
-                        firefoxCursorOffsetFromEnd_ = 0;
-                        recordNextCommitAsImmediateWord_ = false;
-                        if (!suffix.empty()) {
-                            ic_->commitString(suffix);
-                        }
-                        logSurrounding("[firefox-immediate] after-append");
-                        reset();
-                        keyEvent.filterAndAccept();
-                        return;
-                    }
-
-                    if (commonChars > 0 && commonChars < lastImmediateWordCharCount_) {
-                        const size_t deleteCount =
-                            lastImmediateWordCharCount_ - commonChars;
-                        if (deleteCount > 0) {
-                            logSurrounding("[firefox-immediate] before-delete");
-                            ic_->deleteSurroundingText(-static_cast<int>(deleteCount),
-                                                       static_cast<int>(deleteCount));
-                            logSurrounding("[firefox-immediate] after-delete");
-                        }
-                        const std::string suffix = fullWord.substr(fullByteIndex);
-                        if (endsWithWordBreak) {
-                            lastImmediateWord_.clear();
-                            lastImmediateWordCharCount_ = 0;
-                        } else {
-                            lastImmediateWord_ = fullWord;
-                            lastImmediateWordCharCount_ = static_cast<size_t>(fullLen);
-                        }
-                        firefoxCursorOffsetFromEnd_ = 0;
-                        recordNextCommitAsImmediateWord_ = false;
-                        if (!suffix.empty()) {
-                            ic_->commitString(suffix);
-                        }
-                        logSurrounding("[firefox-immediate] after-rewrite");
-                        reset();
-                        keyEvent.filterAndAccept();
-                        return;
-                    }
-                }
-
-                if (lastImmediateWordCharCount_ > 0) {
-                    logSurrounding("[firefox-immediate] before-delete");
-                    ic_->deleteSurroundingText(-static_cast<int>(lastImmediateWordCharCount_),
-                                               static_cast<int>(lastImmediateWordCharCount_));
-                    logSurrounding("[firefox-immediate] after-delete");
-                }
-            }
-            // Record this commit as the latest immediate-commit word if it
-            // looks like a word (no spaces / breaks). This will be used as a
-            // fallback rewrite source when surrounding text is stale/empty.
-            recordNextCommitAsImmediateWord_ = true;
-            commit();
+            commitImmediateDiff(oldImmediateWord, preeditStr_, sym);
+            updateImmediateCommitSessionFromPreedit();
+            reset();
             keyEvent.filterAndAccept();
             return;
         }
@@ -663,6 +696,7 @@ void UnikeyState::handleIgnoredKey() {
 
     // Since we are passing an ignored key to the application, the cursor context
     // or text content may change unpredictably. Clear immediate word tracking.
+    clearImmediateCommitSession();
     lastImmediateWord_.clear();
     lastImmediateWordCharCount_ = 0;
     lastSurroundingRebuildWasStale_ = false;
