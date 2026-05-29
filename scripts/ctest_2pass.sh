@@ -193,11 +193,15 @@ parse_failed_tests_from_output() {
 detect_last_case_id() {
     local output="$1"
     local test_name="$2"
+    local exec_name="$test_name"
+    if [[ "$exec_name" == *-immediate ]]; then
+        exec_name="${exec_name%-immediate}"
+    fi
     local last_case=""
 
     # Pattern: "testsurroundingtext: Case 20" or "testkeyhandling: Case 4 - ..."
     while IFS= read -r line; do
-        if [[ "$line" =~ $test_name:[[:space:]]*Case[[:space:]]+([0-9]+) ]]; then
+        if [[ "$line" =~ $exec_name:[[:space:]]*Case[[:space:]]+([0-9]+) ]]; then
             last_case="${BASH_REMATCH[1]}"
         fi
     done <<< "$output"
@@ -365,6 +369,9 @@ for idx in "${!failed_tests[@]}"; do
                 # Parse command line (simple split on spaces, good enough for this use case)
                 read -ra case_cmd <<< "$cmd_line"
                 case_cmd+=("--case" "$case_id")
+                if [[ "$test_name" == *-immediate ]]; then
+                    case_cmd=(env FCITX_UNIKEY_TEST_FORCE_IMMEDIATE_COMMIT=1 "${case_cmd[@]}")
+                fi
 
                 case_log="$LOGS_DIR/pass2.${test_name}.case${case_id}.log"
                 echo "$ ${case_cmd[*]}"

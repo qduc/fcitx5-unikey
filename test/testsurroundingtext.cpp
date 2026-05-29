@@ -5,6 +5,7 @@
  */
 
 #include "testdir.h"
+#include "testconfig.h"
 #include "testfrontend_public.h"
 
 #include <fcitx-config/rawconfig.h>
@@ -34,7 +35,20 @@ struct CaseSelection {
 };
 
 bool shouldRunCase(const CaseSelection &sel, int id) {
-    return sel.caseId == 0 || sel.caseId == id;
+    if (sel.caseId != 0 && sel.caseId != id) {
+        return false;
+    }
+
+    switch (id) {
+    case 8:
+    case 13:
+    case 21:
+    case 23:
+    case 24:
+        return !skipPreeditOnlyCaseInForcedImmediateMode("testsurroundingtext", id);
+    default:
+        return true;
+    }
 }
 
 void printCases() {
@@ -86,7 +100,7 @@ void setupInputMethodGroup(Instance *instance) {
 
 void configureUnikey(AddonInstance *unikey, const RawConfig &config) {
     // The addon interface is AddonInstance; setConfig is virtual on AddonInstance.
-    unikey->setConfig(config);
+    setTestConfig(unikey, config);
 }
 
 void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,

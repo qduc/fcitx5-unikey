@@ -13,6 +13,7 @@
  */
 
 #include "testdir.h"
+#include "testconfig.h"
 #include "testfrontend_public.h"
 #include <fcitx-config/rawconfig.h>
 #include <fcitx-utils/capabilityflags.h>
@@ -40,7 +41,14 @@ struct CaseSelection {
 };
 
 bool shouldRunCase(const CaseSelection &sel, int id) {
-    return sel.caseId == 0 || sel.caseId == id;
+    if (sel.caseId != 0 && sel.caseId != id) {
+        return false;
+    }
+
+    if (id != 4) {
+        return !skipPreeditOnlyCaseInForcedImmediateMode("testkeyhandling", id);
+    }
+    return true;
 }
 
 void printCases() {
@@ -118,7 +126,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             FCITX_INFO() << "testkeyhandling: Case 1 - Backspace handling in preedit mode";
             config.setValueByPath("ImmediateCommit", "False");
             config.setValueByPath("InputMethod", "Telex");
-            unikey->setConfig(config);
+            setTestConfig(unikey, config);
 
             ic->reset();
             ic->surroundingText().setText("", 0, 0);
@@ -144,7 +152,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             FCITX_INFO() << "testkeyhandling: Case 2 - Backspace at empty preedit";
             config.setValueByPath("ImmediateCommit", "False");
             config.setValueByPath("InputMethod", "Telex");
-            unikey->setConfig(config);
+            setTestConfig(unikey, config);
 
             ic->reset();
             ic->surroundingText().setText("hello", 5, 5);
@@ -162,7 +170,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             FCITX_INFO() << "testkeyhandling: Case 3 - Complex backspace undo sequence";
             config.setValueByPath("ImmediateCommit", "False");
             config.setValueByPath("InputMethod", "Telex");
-            unikey->setConfig(config);
+            setTestConfig(unikey, config);
 
             ic->reset();
             ic->surroundingText().setText("", 0, 0);
@@ -189,7 +197,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             FCITX_INFO() << "testkeyhandling: Case 4 - Backspace with selection in immediate commit mode";
             config.setValueByPath("ImmediateCommit", "True");
             config.setValueByPath("InputMethod", "Telex");
-            unikey->setConfig(config);
+            setTestConfig(unikey, config);
 
             ic->reset();
             // Text "hello" with selection from 0 to 5 (entire text selected)
@@ -212,7 +220,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             FCITX_INFO() << "testkeyhandling: Case 5 - Shift+Shift keystroke restoration";
             config.setValueByPath("ImmediateCommit", "False");
             config.setValueByPath("InputMethod", "Telex");
-            unikey->setConfig(config);
+            setTestConfig(unikey, config);
 
             ic->reset();
             ic->surroundingText().setText("", 0, 0);
@@ -246,7 +254,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             FCITX_INFO() << "testkeyhandling: Case 6 - Shift+Space keystroke restoration";
             config.setValueByPath("ImmediateCommit", "False");
             config.setValueByPath("InputMethod", "Telex");
-            unikey->setConfig(config);
+            setTestConfig(unikey, config);
 
             ic->reset();
             ic->surroundingText().setText("", 0, 0);
@@ -272,7 +280,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             FCITX_INFO() << "testkeyhandling: Case 7 - Keypad digits for VNI - acute";
             config.setValueByPath("ImmediateCommit", "False");
             config.setValueByPath("InputMethod", "VNI");
-            unikey->setConfig(config);
+            setTestConfig(unikey, config);
 
             ic->reset();
             ic->surroundingText().setText("", 0, 0);
@@ -293,7 +301,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             FCITX_INFO() << "testkeyhandling: Case 8 - Keypad digits for VNI - circumflex";
             config.setValueByPath("ImmediateCommit", "False");
             config.setValueByPath("InputMethod", "VNI");
-            unikey->setConfig(config);
+            setTestConfig(unikey, config);
 
             ic->reset();
             ic->surroundingText().setText("", 0, 0);
@@ -314,7 +322,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             FCITX_INFO() << "testkeyhandling: Case 9 - Keypad digits for VNI - hook above";
             config.setValueByPath("ImmediateCommit", "False");
             config.setValueByPath("InputMethod", "VNI");
-            unikey->setConfig(config);
+            setTestConfig(unikey, config);
 
             ic->reset();
             ic->surroundingText().setText("", 0, 0);
@@ -340,7 +348,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             config.setValueByPath("ImmediateCommit", "False");
             config.setValueByPath("InputMethod", "Telex");
             config.setValueByPath("ProcessWAtBegin", "False");
-            unikey->setConfig(config);
+            setTestConfig(unikey, config);
 
             ic->reset();
             ic->surroundingText().setText("", 0, 0);
@@ -357,7 +365,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
 
             // Reset the config
             config.setValueByPath("ProcessWAtBegin", "True");
-            unikey->setConfig(config);
+            setTestConfig(unikey, config);
         }
 
         // --- Test: W at word beginning (process_w_at_begin=True) ---
@@ -368,7 +376,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             config.setValueByPath("ImmediateCommit", "False");
             config.setValueByPath("InputMethod", "Telex");
             config.setValueByPath("ProcessWAtBegin", "True");
-            unikey->setConfig(config);
+            setTestConfig(unikey, config);
 
             ic->reset();
             ic->surroundingText().setText("", 0, 0);
@@ -392,7 +400,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             FCITX_INFO() << "testkeyhandling: Case 12 - Multiple tone changes";
             config.setValueByPath("ImmediateCommit", "False");
             config.setValueByPath("InputMethod", "Telex");
-            unikey->setConfig(config);
+            setTestConfig(unikey, config);
 
             ic->reset();
             ic->surroundingText().setText("", 0, 0);
@@ -414,7 +422,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             FCITX_INFO() << "testkeyhandling: Case 13 - Double-typing to undo tone";
             config.setValueByPath("ImmediateCommit", "False");
             config.setValueByPath("InputMethod", "Telex");
-            unikey->setConfig(config);
+            setTestConfig(unikey, config);
 
             ic->reset();
             ic->surroundingText().setText("", 0, 0);
@@ -435,7 +443,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             FCITX_INFO() << "testkeyhandling: Case 14 - Backspace should not delete from app when preedit is not empty";
             config.setValueByPath("ImmediateCommit", "False");
             config.setValueByPath("InputMethod", "Telex");
-            unikey->setConfig(config);
+            setTestConfig(unikey, config);
 
             ic->reset();
             ic->surroundingText().setText("example", 7, 7);
@@ -458,7 +466,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             FCITX_INFO() << "testkeyhandling: Case 15 - VNI double-typing undo survives space";
             config.setValueByPath("ImmediateCommit", "False");
             config.setValueByPath("InputMethod", "VNI");
-            unikey->setConfig(config);
+            setTestConfig(unikey, config);
 
             ic->reset();
             ic->surroundingText().setText("", 0, 0);
@@ -480,7 +488,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             FCITX_INFO() << "testkeyhandling: Case 16 - Telex double-typing undo survives space";
             config.setValueByPath("ImmediateCommit", "False");
             config.setValueByPath("InputMethod", "Telex");
-            unikey->setConfig(config);
+            setTestConfig(unikey, config);
 
             ic->reset();
             ic->surroundingText().setText("", 0, 0);
@@ -502,7 +510,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             FCITX_INFO() << "testkeyhandling: Case 17 - VNI digit before space commits converted input";
             config.setValueByPath("ImmediateCommit", "False");
             config.setValueByPath("InputMethod", "VNI");
-            unikey->setConfig(config);
+            setTestConfig(unikey, config);
 
             ic->reset();
             ic->surroundingText().setText("", 0, 0);

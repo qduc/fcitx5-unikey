@@ -5,6 +5,7 @@
  */
 
 #include "testdir.h"
+#include "testconfig.h"
 #include "testfrontend_public.h"
 
 #include <fcitx-config/rawconfig.h>
@@ -64,7 +65,7 @@ void setupInputMethodGroup(Instance *instance) {
 }
 
 void configureUnikey(AddonInstance *unikey, const RawConfig &config) {
-    unikey->setConfig(config);
+    setTestConfig(unikey, config);
 }
 
 void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,

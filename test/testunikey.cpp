@@ -5,6 +5,7 @@
  *
  */
 #include "testdir.h"
+#include "testconfig.h"
 #include "testfrontend_public.h"
 #include <fcitx-config/rawconfig.h>
 #include <fcitx-utils/capabilityflags.h>
@@ -1782,14 +1783,14 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
                                                     false);
         RawConfig config;
         config.setValueByPath("SpellCheck", "False");
-        unikey->setConfig(config);
+        setTestConfig(unikey, config);
         testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
         testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("w"), false);
         testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("o"), false);
         testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
 
         config.setValueByPath("Macro", "False");
-        unikey->setConfig(config);
+        setTestConfig(unikey, config);
         testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("b"), false);
         testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
         testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
@@ -1797,7 +1798,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
         testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
 
         config.setValueByPath("AutoNonVnRestore", "True");
-        unikey->setConfig(config);
+        setTestConfig(unikey, config);
 
         testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
         testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("w"), false);
@@ -1810,7 +1811,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
         testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("Return"), false);
 
         config.setValueByPath("SpellCheck", "True");
-        unikey->setConfig(config);
+        setTestConfig(unikey, config);
 
         testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
         testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("w"), false);
@@ -1853,7 +1854,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
         config.setValueByPath("AutoNonVnRestore", "False");
         config.setValueByPath("SpellCheck", "False");
         config.setValueByPath("Macro", "True");
-        unikey->setConfig(config);
+        setTestConfig(unikey, config);
 #if 0
         for (const auto &[_, expect] : expectedTelexData) {
             testfrontend->call<ITestFrontend::pushCommitExpectation>(expect);
@@ -1886,7 +1887,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
         testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("Return"), false);
 
         config.setValueByPath("ImmediateCommit", "True");
-        unikey->setConfig(config);
+        setTestConfig(unikey, config);
 
         ic->reset();
         ic->surroundingText().setText("nga", 3, 3);
@@ -1919,7 +1920,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
         // Immediate commit mode: commit on every keystroke, rebuilding from
         // surrounding text and replacing the previous word.
         config.setValueByPath("ImmediateCommit", "True");
-        unikey->setConfig(config);
+        setTestConfig(unikey, config);
 
         ic->reset();
         ic->surroundingText().setText("", 0, 0);
@@ -1952,7 +1953,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
         // using the last committed word as a fallback rewrite source.
         {
             config.setValueByPath("ImmediateCommit", "True");
-            unikey->setConfig(config);
+            setTestConfig(unikey, config);
 
             ic->reset();
             ic->surroundingText().setText("", 0, 0);
@@ -1976,7 +1977,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
         // the wrong length and corrupt the text.
         {
             config.setValueByPath("ImmediateCommit", "True");
-            unikey->setConfig(config);
+            setTestConfig(unikey, config);
 
             ic->reset();
             ic->surroundingText().setText("", 0, 0);
@@ -2004,7 +2005,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
         // placement can be wrong ("qúa" instead of "quá").
         {
             config.setValueByPath("ImmediateCommit", "True");
-            unikey->setConfig(config);
+            setTestConfig(unikey, config);
 
             ic->reset();
             // Start with no surrounding text updates.
@@ -2030,7 +2031,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
         // Regression: ModifySurroundingText with cursor==0 should not underflow
         // when attempting to inspect the character before cursor.
         config.setValueByPath("ImmediateCommit", "True");
-        unikey->setConfig(config);
+        setTestConfig(unikey, config);
 
         ic->reset();
         ic->surroundingText().setText("", 0, 0);
@@ -2044,7 +2045,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
         // rebuild state/delete surrounding, because it often conflicts with the browser's behavior.
         // Instead, it should just commit the new character.
         config.setValueByPath("ImmediateCommit", "True");
-        unikey->setConfig(config);
+        setTestConfig(unikey, config);
 
         ic->reset();
         // Simulate "e" typed, "xample" auto-completed and selected.
@@ -2074,13 +2075,13 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
         // Verify that word-initial consonants (c, h) are NOT auto-committed, so
         // a trailing VNI tone digit still places the tone correctly ("chép"),
         // and plain Space commits that converted word.
-        {
+        if (!skipPreeditOnlyCaseInForcedImmediateMode("testunikey", 1)) {
             // Switch to Unikey (since we disabled previous tests that did this)
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("Control+space"), false);
 
             config.setValueByPath("ImmediateCommit", "False");
             config.setValueByPath("InputMethod", "VNI");
-            unikey->setConfig(config);
+            setTestConfig(unikey, config);
 
             ic->reset();
             ic->surroundingText().setText("", 0, 0);

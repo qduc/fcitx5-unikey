@@ -78,6 +78,12 @@ declare -a case_logs=()
 # Try to isolate failing cases
 for test_name in "${failed_tests[@]}"; do
     echo -e "${BLUE}→ Analyzing: $test_name${NC}"
+    exec_name="$test_name"
+    force_immediate=0
+    if [[ "$exec_name" == *-immediate ]]; then
+        exec_name="${exec_name%-immediate}"
+        force_immediate=1
+    fi
 
     # Get the test log
     log_file="Testing/Temporary/LastTest.log"
@@ -89,7 +95,7 @@ for test_name in "${failed_tests[@]}"; do
     # Detect failing case number (pattern: "testname: Case N")
     case_id=""
     while IFS= read -r line; do
-        if [[ "$line" =~ $test_name:[[:space:]]*Case[[:space:]]+([0-9]+) ]]; then
+        if [[ "$line" =~ $exec_name:[[:space:]]*Case[[:space:]]+([0-9]+) ]]; then
             case_id="${BASH_REMATCH[1]}"
         fi
     done < "$log_file"
@@ -102,8 +108,8 @@ for test_name in "${failed_tests[@]}"; do
     echo "  Detected failing case: $case_id"
 
     # Find test executable
-    if [[ ! -f "bin/$test_name" ]]; then
-        echo "  Warning: Cannot find test executable at bin/$test_name"
+    if [[ ! -f "bin/$exec_name" ]]; then
+        echo "  Warning: Cannot find test executable at bin/$exec_name"
         continue
     fi
 
@@ -113,10 +119,18 @@ for test_name in "${failed_tests[@]}"; do
 
     if [[ $VERBOSE -eq 1 ]]; then
         echo
-        ./bin/"$test_name" --case "$case_id" 2>&1 | tee "$case_log" || true
+        if [[ $force_immediate -eq 1 ]]; then
+            FCITX_UNIKEY_TEST_FORCE_IMMEDIATE_COMMIT=1 ./bin/"$exec_name" --case "$case_id" 2>&1 | tee "$case_log" || true
+        else
+            ./bin/"$exec_name" --case "$case_id" 2>&1 | tee "$case_log" || true
+        fi
         echo
     else
-        ./bin/"$test_name" --case "$case_id" > "$case_log" 2>&1 || true
+        if [[ $force_immediate -eq 1 ]]; then
+            FCITX_UNIKEY_TEST_FORCE_IMMEDIATE_COMMIT=1 ./bin/"$exec_name" --case "$case_id" > "$case_log" 2>&1 || true
+        else
+            ./bin/"$exec_name" --case "$case_id" > "$case_log" 2>&1 || true
+        fi
         echo "  Log saved: $case_log"
 
         # Show just the failure line
@@ -141,7 +155,13 @@ if [[ ${#case_logs[@]} -gt 0 ]]; then
         if [[ "$basename_log" =~ ^(.+)\.case([0-9]+)\.log$ ]]; then
             test_name="${BASH_REMATCH[1]}"
             case_num="${BASH_REMATCH[2]}"
-            echo -e "  ${BLUE}./bin/$test_name --case $case_num${NC}"
+            exec_name="$test_name"
+            env_prefix=""
+            if [[ "$exec_name" == *-immediate ]]; then
+                exec_name="${exec_name%-immediate}"
+                env_prefix="FCITX_UNIKEY_TEST_FORCE_IMMEDIATE_COMMIT=1 "
+            fi
+            echo -e "  ${BLUE}${env_prefix}./bin/$exec_name --case $case_num${NC}"
         fi
     done
     echo
