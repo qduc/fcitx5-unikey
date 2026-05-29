@@ -218,7 +218,9 @@ bool UnikeyState::hasImmediateCommitSession() const {
 
 bool UnikeyState::canRewriteImmediateCommit() const {
     return ic_->capabilityFlags().test(CapabilityFlag::SurroundingText) &&
-           !isUnsupportedSurroundingApp();
+           !isUnsupportedSurroundingApp() &&
+           (!ic_->surroundingText().isValid() ||
+            ic_->surroundingText().selectedText().empty());
 }
 
 void UnikeyState::replayImmediateCommitKeyStroke(const ImmediateCommitKeyStroke &stroke) {
