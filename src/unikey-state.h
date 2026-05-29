@@ -78,6 +78,18 @@ private:
     bool autoCommit_ = false;
     KeySym lastShiftPressed_ = FcitxKey_None;
 
+    bool restorePreeditToRawKeystrokesIfAvailable();
+
+    // DEFERRED-DECISION flag. True when the visible preedit is a re-converted
+    // view of external raw-ASCII text pulled from surrounding text. Rebuild
+    // replays raw codes through uic_.filter(), so external "ca1" is displayed
+    // as "cá". If the next key is plain Space, restore and commit the original
+    // raw word ("ca1 "); if the next key edits the word, clear this flag and
+    // continue normal converted composition.
+    // Set only by rebuildStateFromSurrounding(), not by the internal
+    // lastImmediateWord_ fallback.
+    bool rawAsciiRebuiltFromSurrounding_ = false;
+
     // Last committed word in immediate-commit mode (UTF-8) and its character
     // count (Unicode code points). Used as a safe fallback when surrounding
     // text is temporarily stale/empty.

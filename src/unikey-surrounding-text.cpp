@@ -83,6 +83,13 @@ static void replayItemsToEngine(UnikeyInputContext &uic,
     }
 }
 
+static bool allItemsAreAscii(const std::vector<RebuildItem> &items) {
+    return !items.empty() && std::all_of(items.begin(), items.end(),
+                                         [](const RebuildItem &item) {
+                                             return item.isAscii;
+                                         });
+}
+
 // Build a UTF-8 string from collected rebuild items for logging and debugging.
 static std::string itemsToUtf8(const std::vector<RebuildItem> &items) {
     std::string result;
@@ -385,6 +392,24 @@ size_t UnikeyState::rebuildStateFromSurrounding(bool deleteSurrounding) {
                 return 0;
             }
 
+            // Same character length but different content strongly implies a
+            // stale snapshot of the SAME word (e.g. the app still reports the
+            // pre-tone "ca" right after we committed "cá"). A real cursor move
+            // or navigation would have cleared lastImmediateWord_, so a
+            // same-length divergence here is staleness, not a different word.
+            // Replaying the stale text would re-run conversion and, for a
+            // repeated tone key, re-apply the tone ("cá") instead of undoing it
+            // ("ca1"); it can also delete the wrong number of characters.
+            // Fall back to the internally tracked word instead.
+            if (wordLength == lastImmediateWordCharCount_) {
+                FCITX_UNIKEY_DEBUG()
+                    << "[rebuildStateFromSurrounding] Surrounding word same length but differs (got=\""
+                    << wordUtf8 << "\", last=\"" << lastImmediateWord_
+                    << "\"), treating as stale";
+                lastSurroundingRebuildWasStale_ = true;
+                return 0;
+            }
+
             // If surrounding is longer but ends with lastImmediateWord_, trust
             // surrounding (it has more context, important for tone placement).
             const bool surroundingEndsWithLast =
@@ -425,8 +450,12 @@ size_t UnikeyState::rebuildStateFromSurrounding(bool deleteSurrounding) {
 
     // Rebuild ukengine state and our composing string by replaying the
     // current word. For ASCII characters we need filtering, otherwise the
-    // engine won't recognize sequences like "aa" -> "â".
+    // engine won't recognize sequences like "aa" -> "â". If all items are
+    // ASCII, remember that the displayed preedit may be a converted view of
+    // external raw text; the next key decides whether to keep editing that
+    // converted view or restore the original raw word before committing.
     replayItemsToEngine(uic_, items, this, keyStrokes_);
+    rawAsciiRebuiltFromSurrounding_ = allItemsAreAscii(items);
 
     if (deleteSurrounding) {
         FCITX_UNIKEY_DEBUG() << "[rebuildStateFromSurrounding] Deleting surrounding text: -"

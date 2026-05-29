@@ -2071,9 +2071,9 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
         testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("BackSpace"), false);
 #endif
 
-        // Regression test for issue "chep1": https://github.com/fcitx/fcitx5-unikey/issues/chep1
-        // Verify that word-initial consonants (c, h) are NOT auto-committed, allowing
-        // proper tone placement when the word is completed (VNI: chep1 -> chép).
+        // Verify that word-initial consonants (c, h) are NOT auto-committed, so
+        // a trailing VNI tone digit still places the tone correctly ("chép"),
+        // and plain Space commits that converted word.
         {
             // Switch to Unikey (since we disabled previous tests that did this)
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("Control+space"), false);
@@ -2086,14 +2086,13 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
             ic->surroundingText().setText("", 0, 0);
             ic->updateSurroundingText();
 
-            // Type "chep1"
+            // Type "chep1" -> "chép" (VNI sắc on "ê" via correct tone placement)
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("c"), false);
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("h"), false);
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("e"), false);
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("p"), false);
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("1"), false);
 
-            // Expect "chép " upon space
             testfrontend->call<ITestFrontend::pushCommitExpectation>("chép ");
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
         }

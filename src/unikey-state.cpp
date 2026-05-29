@@ -80,7 +80,12 @@ void UnikeyState::keyEvent(KeyEvent &keyEvent) {
         }
     }
 
-    if (keyEvent.key().isSimple()) {
+    // Space is treated as a literal space: it should commit the current
+    // composition and insert a blank, never pull the previous word back from
+    // surrounding text to re-run Vietnamese conversion. Skip the rebuild for
+    // space so it never re-feeds the prior word into the Unikey engine.
+    if (keyEvent.key().isSimple() &&
+        keyEvent.rawKey().sym() != FcitxKey_space) {
         rebuildPreedit(keyEvent.rawKey().sym());
     }
     preedit(keyEvent, allowImmediateCommitForThisKey);
@@ -184,6 +189,7 @@ void UnikeyState::reset() {
     uic_.resetBuf();
     preeditStr_.clear();
     keyStrokes_.clear();
+    rawAsciiRebuiltFromSurrounding_ = false;
     updatePreedit();
     lastShiftPressed_ = FcitxKey_None;
 
@@ -209,6 +215,17 @@ void UnikeyState::clearImmediateCommitHistory() {
     surroundingTextUnreliable_ = false;
     surroundingFailureCount_ = 0;
     surroundingSuccessCount_ = 0;
+}
+
+bool UnikeyState::restorePreeditToRawKeystrokesIfAvailable() {
+    uic_.restoreKeyStrokes();
+    if (uic_.bufChars() <= 0) {
+        return false;
+    }
+
+    preeditStr_.clear();
+    syncState(FcitxKey_None);
+    return true;
 }
 
 /**
@@ -420,6 +437,12 @@ void UnikeyState::preedit(KeyEvent &keyEvent, bool allowImmediateCommitForThisKe
 
         const bool immediateCommit = allowImmediateCommitForThisKey;
 
+        if (rawAsciiRebuiltFromSurrounding_ && sym != FcitxKey_space) {
+            // Any non-space printable key edits the word, so drop the deferred
+            // raw-commit preference and continue normal converted composition.
+            rawAsciiRebuiltFromSurrounding_ = false;
+        }
+
         // process sym
 
         // process sym
@@ -458,21 +481,29 @@ void UnikeyState::preedit(KeyEvent &keyEvent, bool allowImmediateCommitForThisKe
 
         autoCommit_ = false;
 
-        // shift + space, shift + shift event
-        if (!lastKeyWithShift_ && state.test(KeyState::Shift) &&
-            sym == FcitxKey_space && !uic_.isAtWordBeginning()) {
-            uic_.restoreKeyStrokes();
-            preeditStr_.clear();
-            syncState(FcitxKey_None);
+        if (sym == FcitxKey_space) {
+            // Plain Space commits the current visible preedit without re-running
+            // IM conversion. Restore the raw keystrokes first only for explicit
+            // Shift+Space, or for the deferred raw-ASCII surrounding-text case
+            // where replay displayed external raw input like "ca1" as converted
+            // "cá".
+            const bool restoreRaw =
+                !immediateCommit &&
+                (state.test(KeyState::Shift) ||
+                 rawAsciiRebuiltFromSurrounding_);
+            if (restoreRaw) {
+                restorePreeditToRawKeystrokesIfAvailable();
+            }
+            rawAsciiRebuiltFromSurrounding_ = false;
             preeditStr_.append(" ");
             commit();
             keyEvent.filterAndAccept();
             return;
-        } else {
-            uic_.filter(sym);
-            keyStrokes_.push_back(sym);
         }
-        // end shift + space
+
+        // shift + shift event (two different shift keys, no space)
+        uic_.filter(sym);
+        keyStrokes_.push_back(sym);
         // end process sym
 
         syncState(sym);

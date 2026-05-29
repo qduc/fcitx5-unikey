@@ -59,6 +59,9 @@ void printCases() {
     std::cout << " 12: Multiple tone changes\n";
     std::cout << " 13: Double-typing to undo tone\n";
     std::cout << " 14: Backspace should not delete from app when preedit is not empty\n";
+    std::cout << " 15: VNI double-typing undo survives space\n";
+    std::cout << " 16: Telex double-typing undo survives space\n";
+    std::cout << " 17: VNI digit before space commits converted input\n";
 }
 
 void announceCase(int id) {
@@ -175,7 +178,6 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             // Backspace should delete the last character: "ướ" → "ư"
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("BackSpace"), false);
 
-            // Commit
             testfrontend->call<ITestFrontend::pushCommitExpectation>("ư ");
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
         }
@@ -276,7 +278,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             ic->surroundingText().setText("", 0, 0);
             ic->updateSurroundingText();
 
-            // Type "a" then KP_1 (acute tone in VNI) → "á"
+            // Type "a" then KP_1. VNI sắc -> "á"; plain Space commits converted.
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("KP_1"), false);
 
@@ -297,7 +299,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             ic->surroundingText().setText("", 0, 0);
             ic->updateSurroundingText();
 
-            // Type "a" then KP_6 (circumflex in VNI) → "â"
+            // Type "a" then KP_6. VNI circumflex -> "â"; plain Space commits converted.
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("KP_6"), false);
 
@@ -318,7 +320,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             ic->surroundingText().setText("", 0, 0);
             ic->updateSurroundingText();
 
-            // Type "a" then KP_3 (hỏi tone in VNI) → "ả"
+            // Type "a" then KP_3. VNI hỏi -> "ả"; plain Space commits converted.
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("KP_3"), false);
 
@@ -447,6 +449,72 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
 
             testfrontend->call<ITestFrontend::pushCommitExpectation>("a ");
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
+        }
+
+        // --- Test: VNI double-typing undo should survive space commit ---
+        if (shouldRunCase(selCopy, 15)) {
+            announceCase(15);
+            FCITX_INFO() << "testkeyhandling: Case 15 - VNI double-typing undo survives space";
+            config.setValueByPath("ImmediateCommit", "False");
+            config.setValueByPath("InputMethod", "VNI");
+            unikey->setConfig(config);
+
+            ic->reset();
+            ic->surroundingText().setText("", 0, 0);
+            ic->updateSurroundingText();
+
+            // Type "ca1" -> "cá", then "1" again to undo -> "ca1"
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("c"), false);
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("1"), false);
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("1"), false);
+
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("ca1 ");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
+        }
+
+        // --- Test: Telex double-typing undo should survive space commit ---
+        if (shouldRunCase(selCopy, 16)) {
+            announceCase(16);
+            FCITX_INFO() << "testkeyhandling: Case 16 - Telex double-typing undo survives space";
+            config.setValueByPath("ImmediateCommit", "False");
+            config.setValueByPath("InputMethod", "Telex");
+            unikey->setConfig(config);
+
+            ic->reset();
+            ic->surroundingText().setText("", 0, 0);
+            ic->updateSurroundingText();
+
+            // Type "cas" -> "cá", then "s" again to undo -> "cas"
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("c"), false);
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("s"), false);
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("s"), false);
+
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("cas ");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
+        }
+
+        // --- Test: VNI digit before space commits the converted word ---
+        if (shouldRunCase(selCopy, 17)) {
+            announceCase(17);
+            FCITX_INFO() << "testkeyhandling: Case 17 - VNI digit before space commits converted input";
+            config.setValueByPath("ImmediateCommit", "False");
+            config.setValueByPath("InputMethod", "VNI");
+            unikey->setConfig(config);
+
+            ic->reset();
+            ic->surroundingText().setText("", 0, 0);
+            ic->updateSurroundingText();
+
+            // "ca1" -> "cá": plain space commits the converted word. Use
+            // Shift+Space if the raw "ca1 " is wanted instead.
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("c"), false);
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("1"), false);
+
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("cá ");
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
         }
 

@@ -62,6 +62,11 @@ void printCases() {
     std::cout << " 20: Backspace clears immediate word history\n";
     std::cout << " 21: ModifySurroundingText rebuilds preedit when cursor moves back\n";
     std::cout << " 22: Control characters (newline, tab) are rejected from rebuild\n";
+    std::cout << " 23: Raw ASCII pasted from surrounding survives plain space\n";
+    std::cout << " 24: Typed VNI digit before space commits converted input\n";
+    std::cout << " 25: Immediate commit double-tap to raw, then space\n";
+    std::cout << " 26: Immediate commit pasted raw word then space\n";
+    std::cout << " 27: Double-tap undo survives stale surrounding\n";
 }
 
 void announceCase(int id) {
@@ -179,7 +184,10 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             ic->surroundingText().setText("ấ", 1, 1);
             ic->updateSurroundingText();
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("ấ ");
+            // Space is treated as a literal space: the already-committed "ấ"
+            // is left untouched (not re-fed into the engine / re-converted),
+            // and we simply commit a blank. The field still ends up as "ấ ".
+            testfrontend->call<ITestFrontend::pushCommitExpectation>(" ");
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
         }
 
@@ -698,7 +706,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("s"), false);
 
             // The preedit should now show "cá" (not yet committed)
-            // When we type another character or space, it should commit
+            // When we type another character or space, it should commit.
             testfrontend->call<ITestFrontend::pushCommitExpectation>("cá ");
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
         }
@@ -729,6 +737,150 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
 
             testfrontend->call<ITestFrontend::pushCommitExpectation>("a");
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
+        }
+
+        // --- Case 23: Raw ASCII pasted text should survive plain space ---
+        if (shouldRunCase(selCopy, 23)) {
+            announceCase(23);
+            FCITX_INFO() << "testsurroundingtext: Case 23 - Raw ASCII pasted from surrounding survives plain space";
+            RawConfig cfg = base;
+            cfg.setValueByPath("ImmediateCommit", "False");
+            cfg.setValueByPath("ModifySurroundingText", "True");
+            cfg.setValueByPath("InputMethod", "VNI");
+            configureUnikey(unikey, cfg);
+
+            ic->reset();
+            ic->surroundingText().setText("ca1", 3, 3);
+            ic->updateSurroundingText();
+
+            // Space is literal: the existing raw "ca1" is never pulled back
+            // into the engine for conversion, so we just commit a blank and
+            // the field stays "ca1 ".
+            testfrontend->call<ITestFrontend::pushCommitExpectation>(" ");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
+        }
+
+        // --- Case 24: Typed VNI digit before space commits converted input ---
+        if (shouldRunCase(selCopy, 24)) {
+            announceCase(24);
+            FCITX_INFO() << "testsurroundingtext: Case 24 - Typed VNI digit before space commits converted input";
+            RawConfig cfg = base;
+            cfg.setValueByPath("ImmediateCommit", "False");
+            cfg.setValueByPath("ModifySurroundingText", "True");
+            cfg.setValueByPath("InputMethod", "VNI");
+            configureUnikey(unikey, cfg);
+
+            ic->reset();
+            ic->surroundingText().setText("ca", 2, 2);
+            ic->updateSurroundingText();
+
+            // "ca" + "1" -> "cá": plain space commits the converted word.
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("1"), false);
+
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("cá ");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
+        }
+
+        // --- Case 25: Immediate commit double-tap to raw, then space ---
+        // Typing a VNI tone twice undoes it ("ca1" -> "cá" -> "ca1"); plain
+        // Space then commits a literal blank, leaving the field as "ca1 ".
+        // The committed word is never re-fed into the engine on Space.
+        if (shouldRunCase(selCopy, 25)) {
+            announceCase(25);
+            FCITX_INFO() << "testsurroundingtext: Case 25 - Immediate commit double-tap then space";
+            RawConfig cfg = base;
+            cfg.setValueByPath("ImmediateCommit", "True");
+            cfg.setValueByPath("ModifySurroundingText", "False");
+            configureUnikey(unikey, cfg);
+
+            ic->reset();
+            ic->surroundingText().setText("", 0, 0);
+            ic->updateSurroundingText();
+
+            // Each immediate commit rewrites the field; mirror the app's
+            // surrounding text after every keystroke.
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("c");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("c"), false);
+            ic->surroundingText().setText("c", 1, 1);
+            ic->updateSurroundingText();
+
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("a");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
+            ic->surroundingText().setText("ca", 2, 2);
+            ic->updateSurroundingText();
+
+            // VNI: 1 = sắc -> "cá".
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("cá");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("1"), false);
+            ic->surroundingText().setText("cá", 2, 2);
+            ic->updateSurroundingText();
+
+            // Second 1 undoes the tone back to raw "ca1".
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("ca1");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("1"), false);
+            ic->surroundingText().setText("ca1", 3, 3);
+            ic->updateSurroundingText();
+
+            // Plain Space commits a literal blank; "ca1" stays untouched.
+            testfrontend->call<ITestFrontend::pushCommitExpectation>(" ");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
+        }
+
+        // --- Case 26: Immediate commit, pasted raw word then space ---
+        // Field already contains "ca1" (e.g. pasted); pressing Space must not
+        // pull it back into the engine. It just commits a blank -> "ca1 ".
+        if (shouldRunCase(selCopy, 26)) {
+            announceCase(26);
+            FCITX_INFO() << "testsurroundingtext: Case 26 - Immediate commit pasted word then space";
+            RawConfig cfg = base;
+            cfg.setValueByPath("ImmediateCommit", "True");
+            cfg.setValueByPath("ModifySurroundingText", "False");
+            configureUnikey(unikey, cfg);
+
+            ic->reset();
+            ic->surroundingText().setText("ca1", 3, 3);
+            ic->updateSurroundingText();
+
+            testfrontend->call<ITestFrontend::pushCommitExpectation>(" ");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
+        }
+
+        // --- Case 27: double-tap undo with STALE surrounding on 2nd tone ---
+        // The app reports a stale pre-tone snapshot ("ca") right after we
+        // committed "cá". The rewrite must NOT trust that stale snapshot and
+        // re-apply the tone; it must fall back to the internally tracked word
+        // so the repeated tone key correctly undoes to raw "ca1".
+        if (shouldRunCase(selCopy, 27)) {
+            announceCase(27);
+            FCITX_INFO() << "testsurroundingtext: Case 27 - double-tap undo survives stale surrounding";
+            RawConfig cfg = base;
+            cfg.setValueByPath("ImmediateCommit", "True");
+            cfg.setValueByPath("ModifySurroundingText", "False");
+            configureUnikey(unikey, cfg);
+
+            ic->reset();
+            ic->surroundingText().setText("", 0, 0);
+            ic->updateSurroundingText();
+
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("c");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("c"), false);
+            ic->surroundingText().setText("c", 1, 1);
+            ic->updateSurroundingText();
+
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("a");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
+            ic->surroundingText().setText("ca", 2, 2);
+            ic->updateSurroundingText();
+
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("cá");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("1"), false);
+            // STALE: app fails to reflect the tone; surrounding still shows "ca".
+            ic->surroundingText().setText("ca", 2, 2);
+            ic->updateSurroundingText();
+
+            // Must undo to raw "ca1" (not re-apply the tone to "cá").
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("ca1");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("1"), false);
         }
 
         instance->deactivate();
