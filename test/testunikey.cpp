@@ -7,6 +7,7 @@
 #include "testdir.h"
 #include "testconfig.h"
 #include "testfrontend_public.h"
+#include "testhelpers.h"
 #include <fcitx-config/rawconfig.h>
 #include <fcitx-utils/capabilityflags.h>
 #include <fcitx-utils/eventdispatcher.h>
@@ -1766,6 +1767,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
             testfrontend->call<ITestFrontend::createInputContext>("testapp");
         auto *ic = instance->inputContextManager().findByUUID(uuid);
         ic->setCapabilityFlags(CapabilityFlag::SurroundingText);
+        TestEnv env{testfrontend, uuid, ic};
 #if 0
         testfrontend->call<ITestFrontend::pushCommitExpectation>("ăo ");
         testfrontend->call<ITestFrontend::pushCommitExpectation>("âo ");
@@ -2077,25 +2079,22 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance) {
         // and plain Space commits that converted word.
         if (!skipPreeditOnlyCaseInForcedImmediateMode("testunikey", 1)) {
             // Switch to Unikey (since we disabled previous tests that did this)
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("Control+space"), false);
+            env.type("Control+space");
 
             config.setValueByPath("ImmediateCommit", "False");
             config.setValueByPath("InputMethod", "VNI");
             setTestConfig(unikey, config);
 
-            ic->reset();
-            ic->surroundingText().setText("", 0, 0);
-            ic->updateSurroundingText();
+            env.resetIC();
 
             // Type "chep1" -> "chép" (VNI sắc on "ê" via correct tone placement)
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("c"), false);
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("h"), false);
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("e"), false);
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("p"), false);
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("1"), false);
+            env.type("c");
+            env.type("h");
+            env.type("e");
+            env.type("p");
+            env.type("1");
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("chép ");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
+            env.expectThenType("chép ", "space");
         }
 
         instance->deactivate();

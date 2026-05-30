@@ -15,6 +15,7 @@
 #include "testdir.h"
 #include "testconfig.h"
 #include "testfrontend_public.h"
+#include "testhelpers.h"
 #include <fcitx-config/rawconfig.h>
 #include <fcitx-utils/capabilityflags.h>
 #include <fcitx-utils/eventdispatcher.h>
@@ -108,9 +109,10 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
         auto *ic = instance->inputContextManager().findByUUID(uuid);
         FCITX_ASSERT(ic);
         ic->setCapabilityFlags(CapabilityFlag::SurroundingText);
+        TestEnv env{testfrontend, uuid, ic};
 
         // Switch to Unikey.
-        testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("Control+space"), false);
+        env.type("Control+space");
 
         // Base config for all tests
         RawConfig config;
@@ -133,21 +135,19 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             config.setValueByPath("InputMethod", "Telex");
             setTestConfig(unikey, config);
 
-            ic->reset();
-            ic->surroundingText().setText("", 0, 0);
-            ic->updateSurroundingText();
+            env.resetIC();
 
             // Type "aas" → "ấ"
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("s"), false);
+            env.type("a");
+            env.type("a");
+            env.type("s");
 
             // Backspace should delete the whole character: "ấ" → ""
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("BackSpace"), false);
+            env.type("BackSpace");
 
             // Commit what's left ("" -> space -> " ")
-            testfrontend->call<ITestFrontend::pushCommitExpectation>(" ");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
+            env.expect(" ");
+            env.type("space");
         }
 
         // --- Test: Backspace at empty preedit ---
@@ -159,13 +159,11 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             config.setValueByPath("InputMethod", "Telex");
             setTestConfig(unikey, config);
 
-            ic->reset();
-            ic->surroundingText().setText("hello", 5, 5);
-            ic->updateSurroundingText();
+            env.setSurrounding("hello", 5);
 
             // With empty preedit, backspace should NOT be filtered (pass through).
             // The test frontend will show "accepted: 0" in logs if not filtered.
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("BackSpace"), false);
+            env.type("BackSpace");
         }
 
         // --- Test: Complex backspace undo sequence ---
@@ -177,22 +175,20 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             config.setValueByPath("InputMethod", "Telex");
             setTestConfig(unikey, config);
 
-            ic->reset();
-            ic->surroundingText().setText("", 0, 0);
-            ic->updateSurroundingText();
+            env.resetIC();
 
             // Type "uw" → "ư", then "ow" → "ươ", then "s" → "ướ"
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("u"), false);
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("w"), false);
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("o"), false);
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("w"), false);
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("s"), false);
+            env.type("u");
+            env.type("w");
+            env.type("o");
+            env.type("w");
+            env.type("s");
 
             // Backspace should delete the last character: "ướ" → "ư"
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("BackSpace"), false);
+            env.type("BackSpace");
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("ư ");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
+            env.expect("ư ");
+            env.type("space");
         }
 
         // --- Test: Backspace in immediate commit mode with selection ---
@@ -204,14 +200,12 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             config.setValueByPath("InputMethod", "Telex");
             setTestConfig(unikey, config);
 
-            ic->reset();
             // Text "hello" with selection from 0 to 5 (entire text selected)
-            ic->surroundingText().setText("hello", 0, 5);
-            ic->updateSurroundingText();
+            env.setSurrounding("hello", 0, 5);
 
             // Backspace should pass through when there's a selection
             // (the application handles deletion of selected text)
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("BackSpace"), false);
+            env.type("BackSpace");
         }
 
         // ==========================================================
@@ -227,25 +221,23 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             config.setValueByPath("InputMethod", "Telex");
             setTestConfig(unikey, config);
 
-            ic->reset();
-            ic->surroundingText().setText("", 0, 0);
-            ic->updateSurroundingText();
+            env.resetIC();
 
             // Type "aa" → "â"
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
+            env.type("a");
+            env.type("a");
 
             // Press Shift twice to trigger restoreKeyStrokes.
             //
             // Note: In some CI/test-frontend environments, Shift_L may not be
             // forwarded as a standalone key event, so we use Shift_R twice for
             // a stable, portable signal.
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key(FcitxKey_Shift_R), false);
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key(FcitxKey_Shift_R), false);
+            env.type(FcitxKey_Shift_R);
+            env.type(FcitxKey_Shift_R);
 
             // The preedit should now be "aa" (restored)
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("aa ");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
+            env.expect("aa ");
+            env.type("space");
         }
 
         // ==========================================================
@@ -261,17 +253,15 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             config.setValueByPath("InputMethod", "Telex");
             setTestConfig(unikey, config);
 
-            ic->reset();
-            ic->surroundingText().setText("", 0, 0);
-            ic->updateSurroundingText();
+            env.resetIC();
 
             // Type "aa" → "â"
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
+            env.type("a");
+            env.type("a");
 
             // Shift+Space should restore to "aa " and commit
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("aa ");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("Shift+space"), false);
+            env.expect("aa ");
+            env.type("Shift+space");
         }
 
         // ==========================================================
@@ -287,16 +277,14 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             config.setValueByPath("InputMethod", "VNI");
             setTestConfig(unikey, config);
 
-            ic->reset();
-            ic->surroundingText().setText("", 0, 0);
-            ic->updateSurroundingText();
+            env.resetIC();
 
             // Type "a" then KP_1. VNI sắc -> "á"; plain Space commits converted.
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("KP_1"), false);
+            env.type("a");
+            env.type("KP_1");
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("á ");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
+            env.expect("á ");
+            env.type("space");
         }
 
         // --- Test: Keypad digits for VNI - circumflex ---
@@ -308,16 +296,14 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             config.setValueByPath("InputMethod", "VNI");
             setTestConfig(unikey, config);
 
-            ic->reset();
-            ic->surroundingText().setText("", 0, 0);
-            ic->updateSurroundingText();
+            env.resetIC();
 
             // Type "a" then KP_6. VNI circumflex -> "â"; plain Space commits converted.
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("KP_6"), false);
+            env.type("a");
+            env.type("KP_6");
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("â ");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
+            env.expect("â ");
+            env.type("space");
         }
 
         // --- Test: Keypad digits for VNI - hook above ---
@@ -329,16 +315,14 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             config.setValueByPath("InputMethod", "VNI");
             setTestConfig(unikey, config);
 
-            ic->reset();
-            ic->surroundingText().setText("", 0, 0);
-            ic->updateSurroundingText();
+            env.resetIC();
 
             // Type "a" then KP_3. VNI hỏi -> "ả"; plain Space commits converted.
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("KP_3"), false);
+            env.type("a");
+            env.type("KP_3");
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("ả ");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
+            env.expect("ả ");
+            env.type("space");
         }
 
         // ==========================================================
@@ -355,18 +339,16 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             config.setValueByPath("ProcessWAtBegin", "False");
             setTestConfig(unikey, config);
 
-            ic->reset();
-            ic->surroundingText().setText("", 0, 0);
-            ic->updateSurroundingText();
+            env.resetIC();
 
             // Type "w" at word beginning - should pass through as "w"
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("w"), false);
+            env.type("w");
 
             // Continue typing "a" - should NOT convert to "ưa" since w was passthrough
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
+            env.type("a");
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("wa ");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
+            env.expect("wa ");
+            env.type("space");
 
             // Reset the config
             config.setValueByPath("ProcessWAtBegin", "True");
@@ -383,15 +365,13 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             config.setValueByPath("ProcessWAtBegin", "True");
             setTestConfig(unikey, config);
 
-            ic->reset();
-            ic->surroundingText().setText("", 0, 0);
-            ic->updateSurroundingText();
+            env.resetIC();
 
             // Type "w" at word beginning - should become "ư"
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("w"), false);
+            env.type("w");
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("ư ");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
+            env.expect("ư ");
+            env.type("space");
         }
 
         // ==========================================================
@@ -407,17 +387,15 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             config.setValueByPath("InputMethod", "Telex");
             setTestConfig(unikey, config);
 
-            ic->reset();
-            ic->surroundingText().setText("", 0, 0);
-            ic->updateSurroundingText();
+            env.resetIC();
 
             // Type "as" → "á", then "f" to change to grave → "à"
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("s"), false);
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("f"), false);
+            env.type("a");
+            env.type("s");
+            env.type("f");
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("à ");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
+            env.expect("à ");
+            env.type("space");
         }
 
         // --- Test: Double-typing to undo ---
@@ -429,17 +407,15 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             config.setValueByPath("InputMethod", "Telex");
             setTestConfig(unikey, config);
 
-            ic->reset();
-            ic->surroundingText().setText("", 0, 0);
-            ic->updateSurroundingText();
+            env.resetIC();
 
             // Type "as" → "á", then "s" again to undo → "as"
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("s"), false);
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("s"), false);
+            env.type("a");
+            env.type("s");
+            env.type("s");
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("as ");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
+            env.expect("as ");
+            env.type("space");
         }
 
         // --- Test: Backspace should not delete from app when preedit is not empty ---
@@ -450,19 +426,16 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             config.setValueByPath("InputMethod", "Telex");
             setTestConfig(unikey, config);
 
-            ic->reset();
-            ic->surroundingText().setText("example", 7, 7);
-            ic->updateSurroundingText();
-
+        env.setSurrounding("example", 7);
             // Type "1" -> in preedit
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("1"), false);
+            env.type("1");
 
             // Backspace should clear preedit and be FILTERED (not pass through to app)
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("BackSpace"), false);
+            env.type("BackSpace");
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("a ");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
+            env.expect("a ");
+            env.type("a");
+            env.type("space");
         }
 
         // --- Test: VNI double-typing undo should survive space commit ---
@@ -473,18 +446,16 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             config.setValueByPath("InputMethod", "VNI");
             setTestConfig(unikey, config);
 
-            ic->reset();
-            ic->surroundingText().setText("", 0, 0);
-            ic->updateSurroundingText();
+            env.resetIC();
 
             // Type "ca1" -> "cá", then "1" again to undo -> "ca1"
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("c"), false);
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("1"), false);
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("1"), false);
+            env.type("c");
+            env.type("a");
+            env.type("1");
+            env.type("1");
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("ca1 ");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
+            env.expect("ca1 ");
+            env.type("space");
         }
 
         // --- Test: Telex double-typing undo should survive space commit ---
@@ -495,18 +466,16 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             config.setValueByPath("InputMethod", "Telex");
             setTestConfig(unikey, config);
 
-            ic->reset();
-            ic->surroundingText().setText("", 0, 0);
-            ic->updateSurroundingText();
+            env.resetIC();
 
             // Type "cas" -> "cá", then "s" again to undo -> "cas"
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("c"), false);
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("s"), false);
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("s"), false);
+            env.type("c");
+            env.type("a");
+            env.type("s");
+            env.type("s");
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("cas ");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
+            env.expect("cas ");
+            env.type("space");
         }
 
         // --- Test: VNI digit before space commits the converted word ---
@@ -517,18 +486,16 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             config.setValueByPath("InputMethod", "VNI");
             setTestConfig(unikey, config);
 
-            ic->reset();
-            ic->surroundingText().setText("", 0, 0);
-            ic->updateSurroundingText();
+            env.resetIC();
 
             // "ca1" -> "cá": plain space commits the converted word. Use
             // Shift+Space if the raw "ca1 " is wanted instead.
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("c"), false);
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("1"), false);
+            env.type("c");
+            env.type("a");
+            env.type("1");
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("cá ");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
+            env.expect("cá ");
+            env.type("space");
         }
 
         // --- Test: Immediate commit should preserve pass-through W replay ---
@@ -540,15 +507,13 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             config.setValueByPath("ProcessWAtBegin", "False");
             setTestConfig(unikey, config);
 
-            ic->reset();
-            ic->surroundingText().setText("", 0, 0);
-            ic->updateSurroundingText();
+            env.resetIC();
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("w");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("w"), false);
+            env.expect("w");
+            env.type("w");
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("wa");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
+            env.expect("wa");
+            env.type("a");
 
             config.setValueByPath("ProcessWAtBegin", "True");
             setTestConfig(unikey, config);
@@ -564,21 +529,19 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             config.setValueByPath("InputMethod", "VNI");
             setTestConfig(unikey, config);
 
-            ic->reset();
-            ic->surroundingText().setText("", 0, 0);
-            ic->updateSurroundingText();
+            env.resetIC();
 
             // Type c, a, n, 1 → preedit "cán"
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("c"), false);
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("n"), false);
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("1"), false);
+            env.type("c");
+            env.type("a");
+            env.type("n");
+            env.type("1");
 
             // Backspace: delete 'n', keep tone → "cá"
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("BackSpace"), false);
+            env.type("BackSpace");
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("cá ");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
+            env.expect("cá ");
+            env.type("space");
         }
 
         // --- Test: Backspace after tone-then-consonant in preedit (Telex) ---
@@ -591,21 +554,19 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             config.setValueByPath("InputMethod", "Telex");
             setTestConfig(unikey, config);
 
-            ic->reset();
-            ic->surroundingText().setText("", 0, 0);
-            ic->updateSurroundingText();
+            env.resetIC();
 
             // Type c, a, n, s → preedit "cán" (Telex: 's' = sắc tone)
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("c"), false);
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("n"), false);
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("s"), false);
+            env.type("c");
+            env.type("a");
+            env.type("n");
+            env.type("s");
 
             // Backspace: delete 'n', keep tone → "cá"
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("BackSpace"), false);
+            env.type("BackSpace");
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("cá ");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
+            env.expect("cá ");
+            env.type("space");
         }
 
         // --- Test: Backspace after late VNI modifiers in preedit ---
@@ -618,31 +579,23 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             config.setValueByPath("InputMethod", "VNI");
             setTestConfig(unikey, config);
 
-            ic->reset();
-            ic->surroundingText().setText("", 0, 0);
-            ic->updateSurroundingText();
+            env.resetIC();
 
-            for (const char *key : {"n", "g", "u", "y", "e", "n", "6", "4"}) {
-                testfrontend->call<ITestFrontend::keyEvent>(uuid, Key(key), false);
-            }
+            env.typeChars("nguyen64");
 
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("BackSpace"), false);
+            env.type("BackSpace");
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("nguyễ ");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
+            env.expect("nguyễ ");
+            env.type("space");
 
-            ic->reset();
-            ic->surroundingText().setText("", 0, 0);
-            ic->updateSurroundingText();
+            env.resetIC();
 
-            for (const char *key : {"n", "g", "u", "y", "e", "6", "4", "n"}) {
-                testfrontend->call<ITestFrontend::keyEvent>(uuid, Key(key), false);
-            }
+            env.typeChars("nguye64n");
 
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("BackSpace"), false);
+            env.type("BackSpace");
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("nguyễ ");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
+            env.expect("nguyễ ");
+            env.type("space");
         }
 
         // --- Test: Backspace after interleaved VNI modifiers in preedit ---
@@ -655,31 +608,23 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             config.setValueByPath("InputMethod", "VNI");
             setTestConfig(unikey, config);
 
-            ic->reset();
-            ic->surroundingText().setText("", 0, 0);
-            ic->updateSurroundingText();
+            env.resetIC();
 
-            for (const char *key : {"t", "r", "u", "o", "7", "n", "g", "2"}) {
-                testfrontend->call<ITestFrontend::keyEvent>(uuid, Key(key), false);
-            }
+            env.typeChars("truo7ng2");
 
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("BackSpace"), false);
+            env.type("BackSpace");
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("trườn ");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
+            env.expect("trườn ");
+            env.type("space");
 
-            ic->reset();
-            ic->surroundingText().setText("", 0, 0);
-            ic->updateSurroundingText();
+            env.resetIC();
 
-            for (const char *key : {"t", "r", "u", "o", "n", "g", "7", "2"}) {
-                testfrontend->call<ITestFrontend::keyEvent>(uuid, Key(key), false);
-            }
+            env.typeChars("truong72");
 
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("BackSpace"), false);
+            env.type("BackSpace");
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("trườn ");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
+            env.expect("trườn ");
+            env.type("space");
         }
 
         instance->deactivate();

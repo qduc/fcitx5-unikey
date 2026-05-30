@@ -7,6 +7,7 @@
 #include "testdir.h"
 #include "testconfig.h"
 #include "testfrontend_public.h"
+#include "testhelpers.h"
 
 #include <fcitx-config/rawconfig.h>
 #include <fcitx-utils/capabilityflags.h>
@@ -125,9 +126,10 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
         auto *ic = instance->inputContextManager().findByUUID(uuid);
         FCITX_ASSERT(ic);
         ic->setCapabilityFlags(CapabilityFlag::SurroundingText);
+        TestEnv env{testfrontend, uuid, ic};
 
         // Switch to Unikey.
-        testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("Control+space"), false);
+        env.type("Control+space");
 
         // Base config: deterministic behavior.
         RawConfig base;
@@ -150,20 +152,18 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             cfg.setValueByPath("ModifySurroundingText", "False");
             configureUnikey(unikey, cfg);
 
-            ic->reset();
             // Obviously foreign surrounding text must be ignored entirely.
-            ic->surroundingText().setText("XYZ", 3, 3);
-            ic->updateSurroundingText();
+            env.setSurrounding("XYZ", 3);
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("n");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("n"), false);
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("ng");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("g"), false);
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("nga");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
+            env.expect("n");
+            env.type("n");
+            env.expect("ng");
+            env.type("g");
+            env.expect("nga");
+            env.type("a");
             // VNI: 3 = hỏi (ả).
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("ngả");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("3"), false);
+            env.expect("ngả");
+            env.type("3");
         }
 
         // --- Case 2: Immediate commit rewrites a Vietnamese char internally ---
@@ -177,22 +177,20 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             cfg.setValueByPath("ModifySurroundingText", "False");
             configureUnikey(unikey, cfg);
 
-            ic->reset();
-            ic->surroundingText().setText("", 0, 0);
-            ic->updateSurroundingText();
+            env.resetIC();
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("n");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("n"), false);
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("ng");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("g"), false);
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("nga");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
+            env.expect("n");
+            env.type("n");
+            env.expect("ng");
+            env.type("g");
+            env.expect("nga");
+            env.type("a");
             // VNI: 3 = hỏi (ả).
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("ngả");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("3"), false);
+            env.expect("ngả");
+            env.type("3");
             // VNI: 1 = sắc (á); rewrites the existing Vietnamese char.
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("ngá");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("1"), false);
+            env.expect("ngá");
+            env.type("1");
         }
 
         // --- Case 3: Immediate commit with proper surrounding updates ---
@@ -204,32 +202,27 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             cfg.setValueByPath("ModifySurroundingText", "False");
             configureUnikey(unikey, cfg);
 
-            ic->reset();
-            ic->surroundingText().setText("", 0, 0);
-            ic->updateSurroundingText();
+            env.resetIC();
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("a");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
-            ic->surroundingText().setText("a", 1, 1);
-            ic->updateSurroundingText();
+            env.expect("a");
+            env.type("a");
+            env.setSurrounding("a", 1);
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("â");
+            env.expect("â");
             // VNI: 6 adds circumflex (â).
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("6"), false);
-            ic->surroundingText().setText("â", 1, 1);
-            ic->updateSurroundingText();
+            env.type("6");
+            env.setSurrounding("â", 1);
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("ấ");
+            env.expect("ấ");
             // VNI: 1 = sắc.
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("1"), false);
-            ic->surroundingText().setText("ấ", 1, 1);
-            ic->updateSurroundingText();
+            env.type("1");
+            env.setSurrounding("ấ", 1);
 
             // Space is treated as a literal space: the already-committed "ấ"
             // is left untouched (not re-fed into the engine / re-converted),
             // and we simply commit a blank. The field still ends up as "ấ ".
-            testfrontend->call<ITestFrontend::pushCommitExpectation>(" ");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
+            env.expect(" ");
+            env.type("space");
         }
 
         // --- Case 4: Stale/empty surrounding fallback (Firefox-like) ---
@@ -241,19 +234,17 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             cfg.setValueByPath("ModifySurroundingText", "False");
             configureUnikey(unikey, cfg);
 
-            ic->reset();
-            ic->surroundingText().setText("", 0, 0);
-            ic->updateSurroundingText();
+            env.resetIC();
 
             // No surrounding updates between key strokes.
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("a");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
+            env.expect("a");
+            env.type("a");
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("â");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("6"), false);
+            env.expect("â");
+            env.type("6");
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("ấ");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("1"), false);
+            env.expect("ấ");
+            env.type("1");
         }
 
         // --- Case 5: Truncated/stale surrounding does not derail internal composition ---
@@ -267,23 +258,20 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             cfg.setValueByPath("ModifySurroundingText", "False");
             configureUnikey(unikey, cfg);
 
-            ic->reset();
-            ic->surroundingText().setText("", 0, 0);
-            ic->updateSurroundingText();
+            env.resetIC();
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("e");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("e"), false);
+            env.expect("e");
+            env.type("e");
 
             // Use a neutral key that does not trigger Telex tone processing.
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("en");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("n"), false);
+            env.expect("en");
+            env.type("n");
 
             // Stale snapshot only shows a prefix of the word; it is ignored.
-            ic->surroundingText().setText("e", 1, 1);
-            ic->updateSurroundingText();
+            env.setSurrounding("e", 1);
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("ena");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
+            env.expect("ena");
+            env.type("a");
         }
 
         // --- Case 6: Immediate commit applies tone to the internally-built word ---
@@ -298,25 +286,22 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             cfg.setValueByPath("ModifySurroundingText", "False");
             configureUnikey(unikey, cfg);
 
-            ic->reset();
-            ic->surroundingText().setText("", 0, 0);
-            ic->updateSurroundingText();
+            env.resetIC();
 
             // Build "qua" from internal keystrokes.
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("q");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("q"), false);
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("qu");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("u"), false);
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("qua");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
+            env.expect("q");
+            env.type("q");
+            env.expect("qu");
+            env.type("u");
+            env.expect("qua");
+            env.type("a");
 
             // App reports a conflicting surrounding word; it must be ignored.
-            ic->surroundingText().setText("zzzqua", 6, 6);
-            ic->updateSurroundingText();
+            env.setSurrounding("zzzqua", 6);
 
             // VNI: 1 = sắc (á).
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("quá");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("1"), false);
+            env.expect("quá");
+            env.type("1");
         }
 
         // --- Case 7: Active selection in surrounding is ignored in immediate mode ---
@@ -331,19 +316,16 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             cfg.setValueByPath("ModifySurroundingText", "False");
             configureUnikey(unikey, cfg);
 
-            ic->reset();
-            ic->surroundingText().setText("", 0, 0);
-            ic->updateSurroundingText();
+            env.resetIC();
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("e");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("e"), false);
+            env.expect("e");
+            env.type("e");
 
             // App reports an active selection "xample"; immediate mode ignores it.
-            ic->surroundingText().setText("example", 1, 7);
-            ic->updateSurroundingText();
+            env.setSurrounding("example", 1, 7);
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("ex");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("x"), false);
+            env.expect("ex");
+            env.type("x");
         }
 
         // --- Case 8: ModifySurroundingText with cursor==0 should not underflow/crash ---
@@ -355,14 +337,12 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             cfg.setValueByPath("ModifySurroundingText", "True");
             configureUnikey(unikey, cfg);
 
-            ic->reset();
-            ic->surroundingText().setText("", 0, 0);
-            ic->updateSurroundingText();
+            env.resetIC();
 
             // In non-immediate mode, "a" should be committed on Return.
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("a");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("Return"), false);
+            env.type("a");
+            env.expect("a");
+            env.type("Return");
         }
 
         // --- Case 9: Single failure should NOT mark surrounding as unreliable ---
@@ -376,28 +356,25 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             cfg.setValueByPath("ModifySurroundingText", "False");
             configureUnikey(unikey, cfg);
 
-            ic->reset();
-            ic->surroundingText().setText("", 0, 0);
-            ic->updateSurroundingText();
+            env.resetIC();
 
             // First keystroke - immediate commit should work.
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("a");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
+            env.expect("a");
+            env.type("a");
 
             // Surrounding stays empty (single stale failure).
             // Second keystroke - should still use fallback successfully.
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("â");
+            env.expect("â");
             // VNI: 6 adds circumflex.
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("6"), false);
+            env.type("6");
 
             // Now provide valid surrounding text - immediate commit should
             // still be enabled (not disabled after one failure).
-            ic->surroundingText().setText("â", 1, 1);
-            ic->updateSurroundingText();
+            env.setSurrounding("â", 1);
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("ấ");
+            env.expect("ấ");
             // VNI: 1 = sắc.
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("1"), false);
+            env.type("1");
         }
 
         // --- Case 10: ImmediateCommit stays internal when surrounding stays stale ---
@@ -412,25 +389,23 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             cfg.setValueByPath("ModifySurroundingText", "False");
             configureUnikey(unikey, cfg);
 
-            ic->reset();
-            ic->surroundingText().setText("", 0, 0);
-            ic->updateSurroundingText();
+            env.resetIC();
 
             // First commit - starts with empty surrounding.
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("t");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("t"), false);
+            env.expect("t");
+            env.type("t");
 
             // Keep surrounding empty (failure 1).
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("to");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("o"), false);
+            env.expect("to");
+            env.type("o");
 
             // Still empty; the internal session remains authoritative.
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("toi");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("i"), false);
+            env.expect("toi");
+            env.type("i");
 
             // The next key still commits immediately from internal state.
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("tois");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("s"), false);
+            env.expect("tois");
+            env.type("s");
         }
 
         // --- Case 11: Focus change (reset) should clear unreliable state ---
@@ -445,18 +420,16 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             configureUnikey(unikey, cfg);
 
             // Build an internal session.
-            ic->reset();
-            ic->surroundingText().setText("", 0, 0);
-            ic->updateSurroundingText();
+            env.resetIC();
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("x");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("x"), false);
+            env.expect("x");
+            env.type("x");
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("xy");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("y"), false);
+            env.expect("xy");
+            env.type("y");
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("xyz");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("z"), false);
+            env.expect("xyz");
+            env.type("z");
 
             // Simulate focus change (triggers InputContextReset), which clears
             // the internal immediate-commit session.
@@ -465,18 +438,17 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             // Foreign surrounding text is present but ignored. The fresh word is
             // built from internal keystrokes only; because the session was
             // cleared, the first key starts a brand-new word ("q", not "xyzq").
-            ic->surroundingText().setText("qua", 3, 3);
-            ic->updateSurroundingText();
+            env.setSurrounding("qua", 3);
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("q");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("q"), false);
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("qu");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("u"), false);
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("qua");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
+            env.expect("q");
+            env.type("q");
+            env.expect("qu");
+            env.type("u");
+            env.expect("qua");
+            env.type("a");
             // VNI: 1 = sắc (á).
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("quá");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("1"), false);
+            env.expect("quá");
+            env.type("1");
         }
 
         // --- Case 12: ImmediateCommit is unaffected by stale surrounding; reset starts fresh ---
@@ -491,38 +463,35 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             cfg.setValueByPath("ModifySurroundingText", "False");
             configureUnikey(unikey, cfg);
 
-            ic->reset();
-            ic->surroundingText().setText("", 0, 0);
-            ic->updateSurroundingText();
+            env.resetIC();
 
             // Stale surrounding text does not disable immediate commit.
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("m");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("m"), false);
+            env.expect("m");
+            env.type("m");
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("ma");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
+            env.expect("ma");
+            env.type("a");
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("man");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("n"), false);
+            env.expect("man");
+            env.type("n");
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("manh");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("h"), false);
+            env.expect("manh");
+            env.type("h");
 
             // A reset clears the internal session. Stale surrounding text is
             // present but ignored; the next word is built from keystrokes only.
             ic->reset();
-            ic->surroundingText().setText("nga", 3, 3);
-            ic->updateSurroundingText();
+            env.setSurrounding("nga", 3);
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("n");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("n"), false);
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("ng");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("g"), false);
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("nga");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
+            env.expect("n");
+            env.type("n");
+            env.expect("ng");
+            env.type("g");
+            env.expect("nga");
+            env.type("a");
             // VNI: 3 = hỏi (ả).
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("ngả");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("3"), false);
+            env.expect("ngả");
+            env.type("3");
         }
 
         // ==========================================================
@@ -540,16 +509,13 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             cfg.setValueByPath("ModifySurroundingText", "True");
             configureUnikey(unikey, cfg);
 
-            ic->reset();
             // Set up Vietnamese text with cursor at end
-            ic->surroundingText().setText("nga", 3, 3);
-            ic->updateSurroundingText();
+            env.setSurrounding("nga", 3);
 
             // Type 's' to add tone - should work with ModifySurroundingText
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("1"), false);
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("ngá");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("Return"),
-                                                        false);
+            env.type("1");
+            env.expect("ngá");
+            env.type("Return");
         }
 
         // --- Case 14: ImmediateCommit takes precedence over
@@ -563,20 +529,17 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             cfg.setValueByPath("ModifySurroundingText", "True");
             configureUnikey(unikey, cfg);
 
-            ic->reset();
-            ic->surroundingText().setText("", 0, 0);
-            ic->updateSurroundingText();
+            env.resetIC();
 
             // Build a word with surrounding updates
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("a");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
-            ic->surroundingText().setText("a", 1, 1);
-            ic->updateSurroundingText();
+            env.expect("a");
+            env.type("a");
+            env.setSurrounding("a", 1);
 
             // Add circumflex - should work in immediate commit mode
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("â");
+            env.expect("â");
             // VNI: 6 adds circumflex
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("6"), false);
+            env.type("6");
         }
 
         // --- Case 15: Surrounding text with word boundary at cursor ---
@@ -589,14 +552,12 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             cfg.setValueByPath("ModifySurroundingText", "False");
             configureUnikey(unikey, cfg);
 
-            ic->reset();
             // Text with space before cursor
-            ic->surroundingText().setText("hello ", 6, 6);
-            ic->updateSurroundingText();
+            env.setSurrounding("hello ", 6);
 
             // Type 'a' - should just commit 'a' without rebuild
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("a");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
+            env.expect("a");
+            env.type("a");
         }
 
         // --- Case 16: Longer word built entirely from internal history ---
@@ -609,27 +570,25 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             cfg.setValueByPath("ModifySurroundingText", "False");
             configureUnikey(unikey, cfg);
 
-            ic->reset();
-            ic->surroundingText().setText("", 0, 0);
-            ic->updateSurroundingText();
+            env.resetIC();
 
             // Type "nghien" one key at a time.
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("n");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("n"), false);
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("ng");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("g"), false);
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("ngh");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("h"), false);
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("nghi");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("i"), false);
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("nghie");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("e"), false);
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("nghien");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("n"), false);
+            env.expect("n");
+            env.type("n");
+            env.expect("ng");
+            env.type("g");
+            env.expect("ngh");
+            env.type("h");
+            env.expect("nghi");
+            env.type("i");
+            env.expect("nghie");
+            env.type("e");
+            env.expect("nghien");
+            env.type("n");
 
             // VNI: 6 adds circumflex to 'e'.
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("nghiên");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("6"), false);
+            env.expect("nghiên");
+            env.type("6");
         }
 
         // --- Case 17: Foreign mixed-content surrounding is ignored ---
@@ -643,22 +602,20 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             cfg.setValueByPath("ModifySurroundingText", "False");
             configureUnikey(unikey, cfg);
 
-            ic->reset();
             // Foreign mixed content present in the field; must be ignored.
-            ic->surroundingText().setText("Việt Nam ", 9, 9);
-            ic->updateSurroundingText();
+            env.setSurrounding("Việt Nam ", 9);
 
             // Build "toi" from internal keystrokes.
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("t");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("t"), false);
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("to");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("o"), false);
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("toi");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("i"), false);
+            env.expect("t");
+            env.type("t");
+            env.expect("to");
+            env.type("o");
+            env.expect("toi");
+            env.type("i");
 
             // VNI: 6 adds circumflex to 'o' -> "tôi".
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("tôi");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("6"), false);
+            env.expect("tôi");
+            env.type("6");
         }
 
         // --- Case 18: Cursor at beginning of document ---
@@ -671,15 +628,13 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             cfg.setValueByPath("ModifySurroundingText", "False");
             configureUnikey(unikey, cfg);
 
-            ic->reset();
             // Cursor at position 0 with text after cursor
-            ic->surroundingText().setText("hello", 0, 0);
-            ic->updateSurroundingText();
+            env.setSurrounding("hello", 0);
 
             // Should just commit 'a' without trying to access text before
             // cursor
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("a");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
+            env.expect("a");
+            env.type("a");
         }
 
         // --- Case 19: Rapid consecutive keystrokes with stale surrounding ---
@@ -692,23 +647,21 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             cfg.setValueByPath("ModifySurroundingText", "False");
             configureUnikey(unikey, cfg);
 
-            ic->reset();
-            ic->surroundingText().setText("", 0, 0);
-            ic->updateSurroundingText();
+            env.resetIC();
 
             // Rapid typing: "toi6" without surrounding updates
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("t");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("t"), false);
+            env.expect("t");
+            env.type("t");
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("to");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("o"), false);
+            env.expect("to");
+            env.type("o");
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("toi");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("i"), false);
+            env.expect("toi");
+            env.type("i");
 
             // Add circumflex - using fallback since no surrounding updates
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("tôi");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("6"), false);
+            env.expect("tôi");
+            env.type("6");
         }
 
         // --- Case 20: Backspace edits the internal immediate word history ---
@@ -722,24 +675,21 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             cfg.setValueByPath("ModifySurroundingText", "False");
             configureUnikey(unikey, cfg);
 
-            ic->reset();
-            ic->surroundingText().setText("", 0, 0);
-            ic->updateSurroundingText();
+            env.resetIC();
 
             // Build "ab" from internal keystrokes.
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("a");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("ab");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("b"), false);
+            env.expect("a");
+            env.type("a");
+            env.expect("ab");
+            env.type("b");
 
             // Backspace edits the internally tracked word: "ab" -> "a".
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("a");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("BackSpace"),
-                                                        false);
+            env.expect("a");
+            env.type("BackSpace");
 
             // Continue editing the internally tracked word: VNI 1 = sắc.
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("á");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("1"), false);
+            env.expect("á");
+            env.type("1");
         }
 
         // --- Case 21: ModifySurroundingText mode rebuilds preedit when cursor moves back ---
@@ -753,30 +703,27 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             cfg.setValueByPath("InputMethod", "Telex");
             configureUnikey(unikey, cfg);
 
-            ic->reset();
-            ic->surroundingText().setText("", 0, 0);
-            ic->updateSurroundingText();
+            env.resetIC();
 
             // Type "ca" and space - should commit "ca " in preedit mode
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("c"), false);
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("ca ");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
+            env.type("c");
+            env.type("a");
+            env.expect("ca ");
+            env.type("space");
 
             // Simulate cursor moving back to position after "ca" (before space)
             // Text is "ca ", cursor at position 2 (after "ca")
-            ic->surroundingText().setText("ca ", 2, 2);
-            ic->updateSurroundingText();
+            env.setSurrounding("ca ", 2);
 
             // Type "s" - should delete "ca" from surrounding, rebuild preedit with "ca",
             // then process "s" -> "cás" which becomes "cá" with Telex
             // Since we're in preedit mode, this will show as preedit, not immediate commit
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("s"), false);
+            env.type("s");
 
             // The preedit should now show "cá" (not yet committed)
             // When we type another character or space, it should commit.
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("cá ");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
+            env.expect("cá ");
+            env.type("space");
         }
 
         // --- Case 22: Control characters (newline, tab) should NOT be rebuilt from surrounding ---
@@ -788,23 +735,20 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             cfg.setValueByPath("ModifySurroundingText", "False");
             configureUnikey(unikey, cfg);
 
-            ic->reset();
             // Surrounding text contains a newline before cursor
-            ic->surroundingText().setText("\n", 1, 1);
-            ic->updateSurroundingText();
+            env.setSurrounding("\n", 1);
 
             // Type 'c' - should NOT include the newline in rebuild
             // Expected: just commit 'c', not '\nc'
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("c");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("c"), false);
+            env.expect("c");
+            env.type("c");
 
             // Similarly test tab character
             ic->reset();
-            ic->surroundingText().setText("\t", 1, 1);
-            ic->updateSurroundingText();
+            env.setSurrounding("\t", 1);
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("a");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
+            env.expect("a");
+            env.type("a");
         }
 
         // --- Case 23: Raw ASCII pasted text should survive plain space ---
@@ -817,15 +761,13 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             cfg.setValueByPath("InputMethod", "VNI");
             configureUnikey(unikey, cfg);
 
-            ic->reset();
-            ic->surroundingText().setText("ca1", 3, 3);
-            ic->updateSurroundingText();
+            env.setSurrounding("ca1", 3);
 
             // Space is literal: the existing raw "ca1" is never pulled back
             // into the engine for conversion, so we just commit a blank and
             // the field stays "ca1 ".
-            testfrontend->call<ITestFrontend::pushCommitExpectation>(" ");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
+            env.expect(" ");
+            env.type("space");
         }
 
         // --- Case 24: Typed VNI digit before space commits converted input ---
@@ -838,15 +780,13 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             cfg.setValueByPath("InputMethod", "VNI");
             configureUnikey(unikey, cfg);
 
-            ic->reset();
-            ic->surroundingText().setText("ca", 2, 2);
-            ic->updateSurroundingText();
+            env.setSurrounding("ca", 2);
 
             // "ca" + "1" -> "cá": plain space commits the converted word.
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("1"), false);
+            env.type("1");
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("cá ");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
+            env.expect("cá ");
+            env.type("space");
         }
 
         // --- Case 25: Immediate commit double-tap to raw, then space ---
@@ -861,37 +801,31 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             cfg.setValueByPath("ModifySurroundingText", "False");
             configureUnikey(unikey, cfg);
 
-            ic->reset();
-            ic->surroundingText().setText("", 0, 0);
-            ic->updateSurroundingText();
+            env.resetIC();
 
             // Each immediate commit rewrites the field; mirror the app's
             // surrounding text after every keystroke.
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("c");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("c"), false);
-            ic->surroundingText().setText("c", 1, 1);
-            ic->updateSurroundingText();
+            env.expect("c");
+            env.type("c");
+            env.setSurrounding("c", 1);
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("ca");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
-            ic->surroundingText().setText("ca", 2, 2);
-            ic->updateSurroundingText();
+            env.expect("ca");
+            env.type("a");
+            env.setSurrounding("ca", 2);
 
             // VNI: 1 = sắc -> "cá".
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("cá");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("1"), false);
-            ic->surroundingText().setText("cá", 2, 2);
-            ic->updateSurroundingText();
+            env.expect("cá");
+            env.type("1");
+            env.setSurrounding("cá", 2);
 
             // Second 1 undoes the tone back to raw "ca1".
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("ca1");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("1"), false);
-            ic->surroundingText().setText("ca1", 3, 3);
-            ic->updateSurroundingText();
+            env.expect("ca1");
+            env.type("1");
+            env.setSurrounding("ca1", 3);
 
             // Plain Space commits a literal blank; "ca1" stays untouched.
-            testfrontend->call<ITestFrontend::pushCommitExpectation>(" ");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
+            env.expect(" ");
+            env.type("space");
         }
 
         // --- Case 26: Immediate commit, pasted raw word then space ---
@@ -905,12 +839,10 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             cfg.setValueByPath("ModifySurroundingText", "False");
             configureUnikey(unikey, cfg);
 
-            ic->reset();
-            ic->surroundingText().setText("ca1", 3, 3);
-            ic->updateSurroundingText();
+            env.setSurrounding("ca1", 3);
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>(" ");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
+            env.expect(" ");
+            env.type("space");
         }
 
         // --- Case 27: double-tap undo with STALE surrounding on 2nd tone ---
@@ -926,29 +858,24 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             cfg.setValueByPath("ModifySurroundingText", "False");
             configureUnikey(unikey, cfg);
 
-            ic->reset();
-            ic->surroundingText().setText("", 0, 0);
-            ic->updateSurroundingText();
+            env.resetIC();
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("c");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("c"), false);
-            ic->surroundingText().setText("c", 1, 1);
-            ic->updateSurroundingText();
+            env.expect("c");
+            env.type("c");
+            env.setSurrounding("c", 1);
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("ca");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
-            ic->surroundingText().setText("ca", 2, 2);
-            ic->updateSurroundingText();
+            env.expect("ca");
+            env.type("a");
+            env.setSurrounding("ca", 2);
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("cá");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("1"), false);
+            env.expect("cá");
+            env.type("1");
             // STALE: app fails to reflect the tone; surrounding still shows "ca".
-            ic->surroundingText().setText("ca", 2, 2);
-            ic->updateSurroundingText();
+            env.setSurrounding("ca", 2);
 
             // Must undo to raw "ca1" (not re-apply the tone to "cá").
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("ca1");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("1"), false);
+            env.expect("ca1");
+            env.type("1");
         }
 
         // --- Case 28: Immediate commit keeps raw VNI word with repeated tone digits ---
@@ -962,12 +889,10 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             cfg.setValueByPath("InputMethod", "VNI");
             configureUnikey(unikey, cfg);
 
-            ic->reset();
-            ic->surroundingText().setText("ca1111", 6, 6);
-            ic->updateSurroundingText();
+            env.setSurrounding("ca1111", 6);
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>(" ");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
+            env.expect(" ");
+            env.type("space");
         }
 
         // --- Case 29: Immediate commit keeps raw Telex word with repeated tone keys ---
@@ -981,12 +906,10 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             cfg.setValueByPath("InputMethod", "Telex");
             configureUnikey(unikey, cfg);
 
-            ic->reset();
-            ic->surroundingText().setText("cassss", 6, 6);
-            ic->updateSurroundingText();
+            env.setSurrounding("cassss", 6);
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>(" ");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
+            env.expect(" ");
+            env.type("space");
         }
 
         // --- Case 30: No surrounding capability should not duplicate append-only typing ---
@@ -998,14 +921,13 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             cfg.setValueByPath("ModifySurroundingText", "False");
             configureUnikey(unikey, cfg);
 
-            ic->reset();
             ic->setCapabilityFlags(CapabilityFlag::NoFlag);
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("e");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("e"), false);
+            env.expect("e");
+            env.type("e");
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("x");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("x"), false);
+            env.expect("x");
+            env.type("x");
 
             ic->setCapabilityFlags(CapabilityFlag::SurroundingText);
         }
@@ -1024,30 +946,25 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             cfg.setValueByPath("ModifySurroundingText", "False");
             configureUnikey(unikey, cfg);
 
-            ic->reset();
             // The app lies: claims the field already holds a long unrelated word.
-            ic->surroundingText().setText("zzzzzzzz", 8, 8);
-            ic->updateSurroundingText();
+            env.setSurrounding("zzzzzzzz", 8);
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("t");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("t"), false);
+            env.expect("t");
+            env.type("t");
 
             // Keep feeding garbage surrounding between keystrokes.
-            ic->surroundingText().setText("garbage", 7, 7);
-            ic->updateSurroundingText();
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("to");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("o"), false);
+            env.setSurrounding("garbage", 7);
+            env.expect("to");
+            env.type("o");
 
-            ic->surroundingText().setText("nonsense", 8, 8);
-            ic->updateSurroundingText();
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("toi");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("i"), false);
+            env.setSurrounding("nonsense", 8);
+            env.expect("toi");
+            env.type("i");
 
             // VNI: 6 adds circumflex to 'o' -> "tôi", from internal history only.
-            ic->surroundingText().setText("stillwrong", 10, 10);
-            ic->updateSurroundingText();
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("tôi");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("6"), false);
+            env.setSurrounding("stillwrong", 10);
+            env.expect("tôi");
+            env.type("6");
         }
 
         // --- Case 32: Immediate commit backspace after late VNI modifiers ---
@@ -1062,53 +979,49 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             cfg.setValueByPath("InputMethod", "VNI");
             configureUnikey(unikey, cfg);
 
-            ic->reset();
-            ic->surroundingText().setText("", 0, 0);
-            ic->updateSurroundingText();
+            env.resetIC();
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("n");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("n"), false);
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("ng");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("g"), false);
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("ngu");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("u"), false);
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("nguy");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("y"), false);
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("nguye");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("e"), false);
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("nguyen");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("n"), false);
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("nguyên");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("6"), false);
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("nguyễn");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("4"), false);
+            env.expect("n");
+            env.type("n");
+            env.expect("ng");
+            env.type("g");
+            env.expect("ngu");
+            env.type("u");
+            env.expect("nguy");
+            env.type("y");
+            env.expect("nguye");
+            env.type("e");
+            env.expect("nguyen");
+            env.type("n");
+            env.expect("nguyên");
+            env.type("6");
+            env.expect("nguyễn");
+            env.type("4");
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("nguyễ");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("BackSpace"), false);
+            env.expect("nguyễ");
+            env.type("BackSpace");
 
-            ic->reset();
-            ic->surroundingText().setText("", 0, 0);
-            ic->updateSurroundingText();
+            env.resetIC();
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("n");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("n"), false);
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("ng");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("g"), false);
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("ngu");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("u"), false);
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("nguy");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("y"), false);
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("nguye");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("e"), false);
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("nguyê");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("6"), false);
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("nguyễ");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("4"), false);
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("nguyễn");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("n"), false);
+            env.expect("n");
+            env.type("n");
+            env.expect("ng");
+            env.type("g");
+            env.expect("ngu");
+            env.type("u");
+            env.expect("nguy");
+            env.type("y");
+            env.expect("nguye");
+            env.type("e");
+            env.expect("nguyê");
+            env.type("6");
+            env.expect("nguyễ");
+            env.type("4");
+            env.expect("nguyễn");
+            env.type("n");
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("nguyễ");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("BackSpace"), false);
+            env.expect("nguyễ");
+            env.type("BackSpace");
         }
 
         // --- Case 33: Immediate commit backspace after interleaved VNI modifiers ---
@@ -1123,53 +1036,49 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             cfg.setValueByPath("InputMethod", "VNI");
             configureUnikey(unikey, cfg);
 
-            ic->reset();
-            ic->surroundingText().setText("", 0, 0);
-            ic->updateSurroundingText();
+            env.resetIC();
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("t");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("t"), false);
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("tr");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("r"), false);
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("tru");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("u"), false);
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("truo");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("o"), false);
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("trươ");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("7"), false);
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("trươn");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("n"), false);
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("trương");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("g"), false);
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("trường");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("2"), false);
+            env.expect("t");
+            env.type("t");
+            env.expect("tr");
+            env.type("r");
+            env.expect("tru");
+            env.type("u");
+            env.expect("truo");
+            env.type("o");
+            env.expect("trươ");
+            env.type("7");
+            env.expect("trươn");
+            env.type("n");
+            env.expect("trương");
+            env.type("g");
+            env.expect("trường");
+            env.type("2");
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("trườn");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("BackSpace"), false);
+            env.expect("trườn");
+            env.type("BackSpace");
 
-            ic->reset();
-            ic->surroundingText().setText("", 0, 0);
-            ic->updateSurroundingText();
+            env.resetIC();
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("t");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("t"), false);
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("tr");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("r"), false);
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("tru");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("u"), false);
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("truo");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("o"), false);
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("truon");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("n"), false);
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("truong");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("g"), false);
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("trương");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("7"), false);
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("trường");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("2"), false);
+            env.expect("t");
+            env.type("t");
+            env.expect("tr");
+            env.type("r");
+            env.expect("tru");
+            env.type("u");
+            env.expect("truo");
+            env.type("o");
+            env.expect("truon");
+            env.type("n");
+            env.expect("truong");
+            env.type("g");
+            env.expect("trương");
+            env.type("7");
+            env.expect("trường");
+            env.type("2");
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("trườn");
-            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("BackSpace"), false);
+            env.expect("trườn");
+            env.type("BackSpace");
         }
 
         instance->deactivate();
