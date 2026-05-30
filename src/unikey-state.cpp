@@ -276,6 +276,11 @@ void UnikeyState::clearImmediateCommitHistory() {
     surroundingTextUnreliable_ = false;
     surroundingFailureCount_ = 0;
     surroundingSuccessCount_ = 0;
+
+    // Context changed (focus/reset): our cursor belief is no longer valid.
+    // Re-anchor from the next surrounding-text reading.
+    expectedCursor_ = -1;
+    pendingDocDelta_ = 0;
 }
 
 bool UnikeyState::restorePreeditToRawKeystrokesIfAvailable() {
@@ -336,12 +341,47 @@ bool UnikeyState::restoreImmediateCommitSession() {
     return true;
 }
 
+// Commit text to the document while keeping our expected-cursor belief in sync.
+// Every insertion into the document goes through here so the cursor-move
+// detector can tell "the caret advanced because we typed" apart from "the caret
+// jumped because the user clicked".
+void UnikeyState::commitStringTracked(const std::string &str) {
+    ic_->commitString(str);
+    if (str.empty()) {
+        return;
+    }
+    auto len = utf8::lengthValidated(str);
+    if (len == utf8::INVALID_LENGTH) {
+        return;
+    }
+    if (expectedCursor_ >= 0) {
+        expectedCursor_ += static_cast<int>(len);
+    }
+    pendingDocDelta_ += static_cast<int>(len);
+}
+
+// Delete from the document while keeping our expected-cursor belief in sync.
+// All call sites delete `size` characters ending at the caret (offset == -size),
+// so the caret moves left by `size`.
+void UnikeyState::deleteSurroundingTextTracked(int offset, int size) {
+    ic_->deleteSurroundingText(offset, size);
+    if (expectedCursor_ >= 0) {
+        // offset is negative (region starts before the caret); the caret ends up
+        // at caret + offset.
+        expectedCursor_ += offset;
+        if (expectedCursor_ < 0) {
+            expectedCursor_ = 0;
+        }
+    }
+    pendingDocDelta_ += offset;
+}
+
 void UnikeyState::commitImmediateDiff(const std::string &oldWord,
                                       const std::string &newWord,
                                       KeySym fallbackSym) {
     if (oldWord.empty()) {
         if (!newWord.empty()) {
-            ic_->commitString(newWord);
+            commitStringTracked(newWord);
         }
         return;
     }
@@ -351,27 +391,75 @@ void UnikeyState::commitImmediateDiff(const std::string &oldWord,
             newWord.compare(0, oldWord.size(), oldWord) == 0) {
             const std::string suffix = newWord.substr(oldWord.size());
             if (!suffix.empty()) {
-                ic_->commitString(suffix);
+                commitStringTracked(suffix);
             }
             return;
         }
 
         if (fallbackSym != FcitxKey_None && fallbackSym != FcitxKey_Shift_L &&
             fallbackSym != FcitxKey_Shift_R) {
-            ic_->commitString(utf8::UCS4ToUTF8(fallbackSym));
+            commitStringTracked(utf8::UCS4ToUTF8(fallbackSym));
         }
         return;
     }
 
     const size_t oldLen = utf8::lengthValidated(oldWord);
     if (oldLen != utf8::INVALID_LENGTH && oldLen > 0) {
-        ic_->deleteSurroundingText(-static_cast<int>(oldLen),
-                                   static_cast<int>(oldLen));
+        deleteSurroundingTextTracked(-static_cast<int>(oldLen),
+                                     static_cast<int>(oldLen));
     }
 
     if (!newWord.empty()) {
-        ic_->commitString(newWord);
+        commitStringTracked(newWord);
     }
+}
+
+// Immediate-commit re-edit after navigation.
+//
+// When the user moves the caret back into (or backspaces up to) a
+// previously-committed word and then presses a VNI tone/shape digit, there is no
+// active immediate session and the engine is at a word beginning: the word now
+// lives only in the application's surrounding text. Rebuild it into a fresh
+// immediate session (without deleting it yet) so the modifier key transforms it;
+// the normal commitImmediateDiff() path then deletes and rewrites it in place.
+//
+// Scoped deliberately to VNI digit modifiers: a digit at a word boundary is only
+// meaningful as a tone/shape key applied to the preceding Vietnamese word, so
+// rebuilding is strictly better than committing a literal digit. Plain letters
+// legitimately start a new word and are left untouched. When there is an active
+// session (forward typing), this does nothing, preserving the immediate-commit
+// invariant that mid-word typing never consults surrounding text.
+bool UnikeyState::tryReeditImmediateFromSurrounding(KeySym sym) {
+    if (!immediateCommitMode() || *engine_->config().im != UkVni) {
+        return false;
+    }
+    const bool isDigit = (sym >= FcitxKey_0 && sym <= FcitxKey_9);
+    if (!isDigit) {
+        return false;
+    }
+    if (hasImmediateCommitSession() || !uic_.isAtWordBeginning()) {
+        return false;
+    }
+    if (isUnsupportedSurroundingApp() ||
+        *engine_->config().oc != UkConv::XUTF8 ||
+        !ic_->capabilityFlags().test(CapabilityFlag::SurroundingText)) {
+        return false;
+    }
+
+    // Rebuild the preceding word from surrounding without deleting it; the diff
+    // commit deletes + rewrites once the modifier transforms the word.
+    const size_t wordLen = rebuildStateFromSurrounding(false);
+    if (wordLen == 0) {
+        return false;
+    }
+
+    // Establish the immediate session so commitImmediateDiff() treats the
+    // rebuilt word as the existing text to rewrite.
+    updateImmediateCommitSessionFromPreedit();
+    FCITX_UNIKEY_DEBUG()
+        << "[reedit] Rebuilt preceding word \"" << preeditStr_ << "\" ("
+        << wordLen << " chars) from surrounding for VNI modifier " << sym;
+    return true;
 }
 
 void UnikeyState::updateImmediateCommitSessionFromPreedit(int forcePassThroughIndex) {
@@ -430,6 +518,103 @@ void UnikeyState::preedit(KeyEvent &keyEvent, bool allowImmediateCommitForThisKe
 
     FCITX_INFO() << "[preedit] Processing key " << sym
                          << " Current preedit: \"" << preeditStr_ << "\"";
+    {
+        const auto &st = ic_->surroundingText();
+        if (st.isValid() && st.text().empty() && st.cursor() == 0 &&
+            st.anchor() == 0) {
+            // A "valid" snapshot that is completely empty with a zeroed
+            // cursor/anchor is, in practice, an unreliable placeholder (observed
+            // as Firefox's first keystroke after focus). Discard it: don't run
+            // detection and don't let it clobber our existing cursor belief.
+            FCITX_INFO() << "[preedit] surroundingText: empty text with cursor=0 "
+                            "anchor=0; treating as unreliable, discarding";
+        } else if (st.isValid()) {
+            const int actual = static_cast<int>(st.cursor());
+            const int anchor = static_cast<int>(st.anchor());
+            const bool hasSelection =
+                actual != anchor || !st.selectedText().empty();
+            auto preeditLen = utf8::lengthValidated(preeditStr_);
+            const int preeditChars =
+                preeditLen == utf8::INVALID_LENGTH ? -1
+                                                   : static_cast<int>(preeditLen);
+
+            FCITX_INFO() << "[preedit] surroundingText: text=\"" << st.text()
+                         << "\" cursor=" << actual << " anchor=" << anchor;
+
+            // Cursor-move detection (observation-only for now). expectedCursor_
+            // holds where our own commits/deletes left the caret at the end of
+            // the previous key event. If the app now reports a different cursor
+            // that our edits cannot explain, the caret likely moved without a
+            // key event (e.g. a mouse click).
+            if (hasSelection) {
+                FCITX_INFO() << "[cursor-move] selection active "
+                                "(actual!=anchor); skipping detection";
+            } else if (expectedCursor_ < 0) {
+                FCITX_INFO() << "[cursor-move] anchoring expectedCursor=" << actual
+                             << " (first reading) preeditChars=" << preeditChars;
+            } else {
+                const int delta = actual - expectedCursor_;
+                // A forward jump (actual > expected) cannot be produced by a
+                // stale/lagging snapshot (which only reports an older, smaller
+                // cursor), so it is a high-confidence move -- unless it is within
+                // the active preedit length, in which case it may just be an app
+                // that counts the preedit in its cursor. A backward delta is
+                // ambiguous with surrounding-text lag, so only a gap larger than
+                // the lag tolerance counts as a real move.
+                const bool explainableByPreedit =
+                    preeditChars >= 0 && delta > 0 && delta <= preeditChars;
+                bool moved = false;
+                if (delta > 0 && !explainableByPreedit) {
+                    moved = true;
+                } else if (delta < 0 &&
+                           (-delta) > kCursorMoveBackwardTolerance) {
+                    moved = true;
+                }
+                const char *verdict =
+                    delta == 0 ? "in-sync"
+                    : explainableByPreedit
+                        ? "maybe-preedit-included"
+                        : moved ? (delta > 0 ? "FORWARD-JUMP (invalidating)"
+                                             : "BACKWARD-MOVE (invalidating)")
+                                : "BACKWARD-DELTA (within lag tolerance)";
+                FCITX_INFO() << "[cursor-move] expected=" << expectedCursor_
+                             << " actual=" << actual << " delta=" << delta
+                             << " preeditChars=" << preeditChars
+                             << " lastImmediateWordChars="
+                             << lastImmediateWordCharCount_
+                             << " unreliable=" << surroundingTextUnreliable_
+                             << " supported=" << !isUnsupportedSurroundingApp()
+                             << " => " << verdict;
+
+                // The caret moved without a key event (e.g. a mouse click). Our
+                // composition state and immediate-commit rewrite history now
+                // point at the wrong location, so discard them: the current key
+                // will start a fresh word at the new caret position. Mirror the
+                // InputContextReset path used for focus changes.
+                if (moved) {
+                    const bool hadState =
+                        !keyStrokes_.empty() || !preeditStr_.empty() ||
+                        !lastImmediateWord_.empty() ||
+                        hasImmediateCommitSession();
+                    if (hadState) {
+                        FCITX_INFO() << "[cursor-move] discarding composition "
+                                        "state due to caret move";
+                        clearImmediateCommitHistory();
+                        reset();
+                    }
+                }
+            }
+
+            // Re-anchor to the app's (assumed fresh) cursor for this event, then
+            // let this event's tracked commits/deletes advance it again.
+            if (!hasSelection) {
+                expectedCursor_ = actual;
+            }
+        } else {
+            FCITX_INFO() << "[preedit] surroundingText: invalid/unavailable";
+        }
+    }
+    pendingDocDelta_ = 0;
 
     // We try to detect Press and release of two different shift.
     // The sequence we want to detect is:
@@ -673,6 +858,11 @@ void UnikeyState::preedit(KeyEvent &keyEvent, bool allowImmediateCommitForThisKe
         uic_.setCapsState(state.test(KeyState::Shift),
                           state.test(KeyState::CapsLock));
 
+        // Re-edit support: a VNI modifier digit arriving at a word boundary with
+        // no active session means the user navigated back to a committed word.
+        // Rebuild that word from surrounding text so the modifier applies to it.
+        tryReeditImmediateFromSurrounding(sym);
+
         const bool immediateCommit = allowImmediateCommitForThisKey;
         const std::string oldImmediateWord = immediateCommitWord_;
         if (immediateCommit) {
@@ -744,7 +934,7 @@ void UnikeyState::preedit(KeyEvent &keyEvent, bool allowImmediateCommitForThisKe
                 if (restoreRaw) {
                     commitImmediateDiff(oldImmediateWord, preeditStr_);
                 }
-                ic_->commitString(" ");
+                commitStringTracked(" ");
                 clearImmediateCommitSession();
                 reset();
                 keyEvent.filterAndAccept();
@@ -871,7 +1061,7 @@ void UnikeyState::commit() {
     }
 
     if (!preeditStr_.empty()) {
-        ic_->commitString(preeditStr_);
+        commitStringTracked(preeditStr_);
     }
     reset();
 }

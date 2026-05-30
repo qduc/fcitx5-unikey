@@ -460,8 +460,8 @@ size_t UnikeyState::rebuildStateFromSurrounding(bool deleteSurrounding) {
     if (deleteSurrounding) {
         FCITX_UNIKEY_DEBUG() << "[rebuildStateFromSurrounding] Deleting surrounding text: -"
                              << wordLength << " " << wordLength;
-        ic_->deleteSurroundingText(-static_cast<int>(wordLength),
-                                   static_cast<int>(wordLength));
+        deleteSurroundingTextTracked(-static_cast<int>(wordLength),
+                                     static_cast<int>(wordLength));
     }
     return wordLength;
 }
@@ -516,8 +516,8 @@ size_t UnikeyState::rebuildStateFromLastImmediateWord(bool deleteSurrounding, Ke
         FCITX_UNIKEY_DEBUG()
             << "[rebuildStateFromLastImmediateWord] Deleting surrounding text: -"
             << lastImmediateWordCharCount_ << " " << lastImmediateWordCharCount_;
-        ic_->deleteSurroundingText(-static_cast<int>(lastImmediateWordCharCount_),
-                                   static_cast<int>(lastImmediateWordCharCount_));
+        deleteSurroundingTextTracked(-static_cast<int>(lastImmediateWordCharCount_),
+                                     static_cast<int>(lastImmediateWordCharCount_));
     }
 
     return items.size();

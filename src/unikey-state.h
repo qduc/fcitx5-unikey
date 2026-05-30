@@ -84,6 +84,27 @@ private:
     bool autoCommit_ = false;
     KeySym lastShiftPressed_ = FcitxKey_None;
 
+    // --- Experimental: mouse-driven cursor-move detection ---
+    // Our running belief of where the document caret is. It is anchored from the
+    // application's surrounding-text cursor at the top of each key event and
+    // advanced by our own commits/deletes during that event. If, at the next key
+    // event, the app-reported cursor differs from this by an amount our own edits
+    // cannot explain, the caret most likely moved without a key event (e.g. a
+    // mouse click). -1 means "not yet anchored".
+    int expectedCursor_ = -1;
+    // A backward cursor delta is ambiguous with surrounding-text lag (a stale
+    // snapshot reports an older, smaller cursor). Only treat a backward gap
+    // larger than this many characters as a real caret move; smaller gaps are
+    // absorbed as possible lag. Forward jumps need no tolerance — lag cannot
+    // produce a larger-than-expected cursor.
+    static constexpr int kCursorMoveBackwardTolerance = 1;
+    // Net characters our own commits/deletes added to the document during the
+    // current key event (positive = inserted, negative = deleted). Used only for
+    // logging so we can attribute a cursor delta to our edits vs. a real move.
+    int pendingDocDelta_ = 0;
+    void commitStringTracked(const std::string &str);
+    void deleteSurroundingTextTracked(int offset, int size);
+
     bool restorePreeditToRawKeystrokesIfAvailable();
     void clearImmediateCommitSession();
     bool restoreImmediateCommitSession();
@@ -94,6 +115,7 @@ private:
     void updateImmediateCommitSessionFromPreedit(int forcePassThroughIndex = -1);
     bool hasImmediateCommitSession() const;
     void replayImmediateCommitKeyStroke(const ImmediateCommitKeyStroke &stroke);
+    bool tryReeditImmediateFromSurrounding(KeySym sym);
 
     // DEFERRED-DECISION flag. True when the visible preedit is a re-converted
     // view of external raw-ASCII text pulled from surrounding text. Rebuild

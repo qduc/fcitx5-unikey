@@ -85,9 +85,12 @@ void printCases() {
     std::cout << " 28: Immediate commit keeps raw VNI word with repeated tone digits\n";
     std::cout << " 29: Immediate commit keeps raw Telex word with repeated tone keys\n";
     std::cout << " 30: Immediate commit without surrounding capability avoids whole-word duplication\n";
-    std::cout << " 31: ImmediateCommit ignores obviously stale surrounding text\n";
+    std::cout << " 31: ImmediateCommit ignores stale surrounding text content\n";
     std::cout << " 32: Immediate commit backspace after late VNI modifiers\n";
     std::cout << " 33: Immediate commit backspace after interleaved VNI modifiers\n";
+    std::cout << " 34: Mouse caret move invalidates immediate-commit state\n";
+    std::cout << " 35: Immediate re-edit: Left arrow back to word, then VNI tone\n";
+    std::cout << " 36: Immediate re-edit: BackSpace to word, then VNI tone\n";
 }
 
 void announceCase(int id) {
@@ -324,7 +327,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             // App reports an active selection "xample"; immediate mode ignores it.
             env.setSurrounding("example", 1, 7);
 
-            env.expect("ex");
+            env.expect("x");
             env.type("x");
         }
 
@@ -552,6 +555,8 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             cfg.setValueByPath("ModifySurroundingText", "False");
             configureUnikey(unikey, cfg);
 
+            env.resetIC();
+
             // Text with space before cursor
             env.setSurrounding("hello ", 6);
 
@@ -602,6 +607,8 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             cfg.setValueByPath("ModifySurroundingText", "False");
             configureUnikey(unikey, cfg);
 
+            env.resetIC();
+
             // Foreign mixed content present in the field; must be ignored.
             env.setSurrounding("Việt Nam ", 9);
 
@@ -627,6 +634,8 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             cfg.setValueByPath("ImmediateCommit", "True");
             cfg.setValueByPath("ModifySurroundingText", "False");
             configureUnikey(unikey, cfg);
+
+            env.resetIC();
 
             // Cursor at position 0 with text after cursor
             env.setSurrounding("hello", 0);
@@ -735,6 +744,8 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             cfg.setValueByPath("ModifySurroundingText", "False");
             configureUnikey(unikey, cfg);
 
+            env.resetIC();
+
             // Surrounding text contains a newline before cursor
             env.setSurrounding("\n", 1);
 
@@ -744,7 +755,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             env.type("c");
 
             // Similarly test tab character
-            ic->reset();
+            env.resetIC();
             env.setSurrounding("\t", 1);
 
             env.expect("a");
@@ -932,37 +943,47 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             ic->setCapabilityFlags(CapabilityFlag::SurroundingText);
         }
 
-        // --- Case 31: ImmediateCommit ignores obviously stale surrounding text ---
-        // Regression: with ImmediateCommit on, an app that reports wildly stale
-        // or incorrect surrounding text (and keeps lying between keystrokes)
-        // must not influence the committed result. The output is driven solely
-        // by internal keystroke history. Under the old surrounding-bootstrap
-        // behavior the lie below ("zzzzzzzz") would have corrupted the result.
+        // --- Case 31: ImmediateCommit ignores stale surrounding text content ---
+        // Regression: with ImmediateCommit on, an app that reports stale or
+        // incorrect surrounding text *content* must not influence the committed
+        // result. The output is driven solely by internal keystroke history.
+        // Under the old surrounding-bootstrap behavior the lie below
+        // ("zzzzzzzz") would have corrupted the result.
+        //
+        // NOTE: the reported cursor advances by one per keystroke, consistent
+        // with our own commits. This is deliberate: the cursor-move detector
+        // (see preedit()) interprets a cursor that jumps inconsistently with our
+        // edits as a mouse-driven caret move and invalidates state. A real app
+        // reports an accurate cursor even when its surrounding *text* snapshot is
+        // stale, so here we exercise stale text with a truthful cursor. (A
+        // wildly-inconsistent cursor is now treated as a caret move, by design.)
         if (shouldRunCase(selCopy, 31)) {
             announceCase(31);
-            FCITX_INFO() << "testsurroundingtext: Case 31 - ImmediateCommit ignores obviously stale surrounding";
+            FCITX_INFO() << "testsurroundingtext: Case 31 - ImmediateCommit ignores stale surrounding text";
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "True");
             cfg.setValueByPath("ModifySurroundingText", "False");
             configureUnikey(unikey, cfg);
 
-            // The app lies: claims the field already holds a long unrelated word.
-            env.setSurrounding("zzzzzzzz", 8);
+            env.resetIC();
+
+            // The app lies about text content but reports a truthful cursor.
+            env.setSurrounding("zzzzzzzz", 0);
 
             env.expect("t");
             env.type("t");
 
-            // Keep feeding garbage surrounding between keystrokes.
-            env.setSurrounding("garbage", 7);
+            // Keep feeding stale/garbage text, cursor advancing with our typing.
+            env.setSurrounding("garbage", 1);
             env.expect("to");
             env.type("o");
 
-            env.setSurrounding("nonsense", 8);
+            env.setSurrounding("nonsense", 2);
             env.expect("toi");
             env.type("i");
 
             // VNI: 6 adds circumflex to 'o' -> "tôi", from internal history only.
-            env.setSurrounding("stillwrong", 10);
+            env.setSurrounding("stillwrong", 3);
             env.expect("tôi");
             env.type("6");
         }
@@ -1079,6 +1100,113 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
 
             env.expect("trườn");
             env.type("BackSpace");
+        }
+
+        // --- Case 34: Mouse caret move invalidates immediate-commit state ---
+        // A caret move with no key event (e.g. the user clicks elsewhere) is
+        // detected by comparing the app-reported cursor against where our own
+        // commits left it. When the cursor jumps inconsistently with our edits,
+        // the composition/immediate-commit state is discarded so the next key
+        // starts a fresh word at the new location instead of rewriting the old
+        // word at the wrong position.
+        if (shouldRunCase(selCopy, 34)) {
+            announceCase(34);
+            FCITX_INFO() << "testsurroundingtext: Case 34 - Mouse caret move invalidates immediate-commit state";
+            RawConfig cfg = base;
+            cfg.setValueByPath("ImmediateCommit", "True");
+            cfg.setValueByPath("ModifySurroundingText", "False");
+            cfg.setValueByPath("InputMethod", "VNI");
+            configureUnikey(unikey, cfg);
+
+            env.resetIC();
+
+            // Type "to" with a truthful, advancing cursor (no move).
+            env.expect("t");
+            env.type("t");
+            env.setSurrounding("t", 1);
+            env.expect("to");
+            env.type("o");
+
+            // Simulate a mouse click far away: the cursor jumps to 16, which is
+            // inconsistent with our edits (we left it at 2). This must be treated
+            // as a caret move and invalidate the "to" session.
+            env.setSurrounding("hello world here", 16);
+            // If state were NOT invalidated, "a" would rewrite "to" -> "toa".
+            // With invalidation it commits a fresh "a" at the new position.
+            env.expect("a");
+            env.type("a");
+
+            // Composition resumes cleanly at the new location: VNI "a1" -> "á".
+            env.setSurrounding("hello world herea", 17);
+            env.expect("á");
+            env.type("1");
+        }
+
+        // --- Case 35: Immediate re-edit after Left arrow back into a word ---
+        // Type "ca ", move the caret back to "ca|" with Left, then press VNI tone
+        // "1". Immediate mode normally owns only the current word, but here the
+        // word lives in surrounding text; it must be rebuilt so the tone applies:
+        // "ca" -> "cá" (leaving the trailing space intact).
+        if (shouldRunCase(selCopy, 35)) {
+            announceCase(35);
+            FCITX_INFO() << "testsurroundingtext: Case 35 - Immediate re-edit after Left arrow";
+            RawConfig cfg = base;
+            cfg.setValueByPath("ImmediateCommit", "True");
+            cfg.setValueByPath("ModifySurroundingText", "False");
+            cfg.setValueByPath("InputMethod", "VNI");
+            configureUnikey(unikey, cfg);
+
+            env.resetIC();
+
+            env.expect("c");
+            env.type("c");
+            env.setSurrounding("c", 1);
+            env.expect("ca");
+            env.type("a");
+            env.setSurrounding("ca", 2);
+            env.expect(" ");
+            env.type("space");
+
+            // Caret moves back to just after "ca" (before the space).
+            env.setSurrounding("ca ", 3);
+            env.type("Left");
+            env.setSurrounding("ca ", 2);
+
+            // VNI "1" must rebuild "ca" from surrounding and apply the tone.
+            env.expect("cá");
+            env.type("1");
+        }
+
+        // --- Case 36: Immediate re-edit after BackSpace up to a word ---
+        // Type "ca ", BackSpace away the trailing space (caret now at "ca|"), then
+        // press VNI tone "1" -> "cá".
+        if (shouldRunCase(selCopy, 36)) {
+            announceCase(36);
+            FCITX_INFO() << "testsurroundingtext: Case 36 - Immediate re-edit after BackSpace";
+            RawConfig cfg = base;
+            cfg.setValueByPath("ImmediateCommit", "True");
+            cfg.setValueByPath("ModifySurroundingText", "False");
+            cfg.setValueByPath("InputMethod", "VNI");
+            configureUnikey(unikey, cfg);
+
+            env.resetIC();
+
+            env.expect("c");
+            env.type("c");
+            env.setSurrounding("c", 1);
+            env.expect("ca");
+            env.type("a");
+            env.setSurrounding("ca", 2);
+            env.expect(" ");
+            env.type("space");
+
+            // BackSpace deletes the trailing space; caret ends at "ca|".
+            env.setSurrounding("ca ", 3);
+            env.type("BackSpace");
+            env.setSurrounding("ca", 2);
+
+            env.expect("cá");
+            env.type("1");
         }
 
         instance->deactivate();
