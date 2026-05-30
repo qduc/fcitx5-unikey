@@ -76,6 +76,7 @@ void printCases() {
     std::cout << " 20: Backspace after tone-then-consonant in preedit (Telex)\n";
     std::cout << " 21: Backspace after late VNI modifiers in preedit\n";
     std::cout << " 22: Backspace after interleaved VNI modifiers in preedit\n";
+    std::cout << " 23: Shift+Shift restoration in immediate commit mode\n";
 }
 
 void announceCase(int id) {
@@ -517,6 +518,29 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
 
             config.setValueByPath("ProcessWAtBegin", "True");
             setTestConfig(unikey, config);
+        }
+
+        // --- Test: Shift+Shift should restore raw keystrokes in immediate mode ---
+        if (shouldRunCase(selCopy, 23)) {
+            announceCase(23);
+            FCITX_INFO() << "testkeyhandling: Case 23 - Shift+Shift restoration in immediate commit mode";
+            config.setValueByPath("ImmediateCommit", "True");
+            config.setValueByPath("InputMethod", "Telex");
+            setTestConfig(unikey, config);
+
+            env.resetIC();
+
+            env.expect("a");
+            env.type("a");
+
+            env.expect("â");
+            env.type("a");
+
+            env.type(FcitxKey_Shift_R);
+            env.type(FcitxKey_Shift_R);
+
+            env.expect("aa ");
+            env.type("space");
         }
 
         // --- Test: Backspace after tone-then-consonant in preedit (VNI) ---

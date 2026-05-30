@@ -106,9 +106,12 @@ private:
     void deleteSurroundingTextTracked(int offset, int size);
 
     bool restorePreeditToRawKeystrokesIfAvailable();
+    bool restorePreeditToRawAvailableHistory();
     void clearImmediateCommitSession();
     bool restoreImmediateCommitSession();
     bool canRewriteImmediateCommit() const;
+    bool hasActiveSelection() const;
+    static bool hasActiveSelection(const SurroundingText &st);
     void commitImmediateDiff(const std::string &oldWord,
                              const std::string &newWord,
                              KeySym fallbackSym = FcitxKey_None);
@@ -126,6 +129,12 @@ private:
     // Set only by rebuildStateFromSurrounding(), not by the internal
     // lastImmediateWord_ fallback.
     bool rawAsciiRebuiltFromSurrounding_ = false;
+
+    // Set by Shift+Shift restoration in immediate-commit mode. The visible
+    // preedit now contains the raw keystrokes for the already-committed word,
+    // so the next plain Space should rewrite that word to raw text before
+    // inserting the blank.
+    bool restoreRawOnNextCommit_ = false;
 
     // Last committed word in immediate-commit mode (UTF-8) and its character
     // count (Unicode code points). Used as a safe fallback when surrounding

@@ -84,13 +84,14 @@ void printCases() {
     std::cout << " 27: Double-tap undo survives stale surrounding\n";
     std::cout << " 28: Immediate commit keeps raw VNI word with repeated tone digits\n";
     std::cout << " 29: Immediate commit keeps raw Telex word with repeated tone keys\n";
-    std::cout << " 30: Immediate commit without surrounding capability avoids whole-word duplication\n";
+    std::cout << " 30: Immediate commit falls back to preedit without surrounding capability\n";
     std::cout << " 31: ImmediateCommit ignores stale surrounding text content\n";
     std::cout << " 32: Immediate commit backspace after late VNI modifiers\n";
     std::cout << " 33: Immediate commit backspace after interleaved VNI modifiers\n";
     std::cout << " 34: Mouse caret move invalidates immediate-commit state\n";
     std::cout << " 35: Immediate re-edit: Left arrow back to word, then VNI tone\n";
     std::cout << " 36: Immediate re-edit: BackSpace to word, then VNI tone\n";
+    std::cout << " 37: LibreOffice disables immediate commit fallback to preedit\n";
 }
 
 void announceCase(int id) {
@@ -923,10 +924,10 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             env.type("space");
         }
 
-        // --- Case 30: No surrounding capability should not duplicate append-only typing ---
+        // --- Case 30: No surrounding capability disables immediate commit ---
         if (shouldRunCase(selCopy, 30)) {
             announceCase(30);
-            FCITX_INFO() << "testsurroundingtext: Case 30 - ImmediateCommit without surrounding capability avoids duplication";
+            FCITX_INFO() << "testsurroundingtext: Case 30 - ImmediateCommit falls back to preedit without surrounding capability";
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "True");
             cfg.setValueByPath("ModifySurroundingText", "False");
@@ -934,11 +935,11 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
 
             ic->setCapabilityFlags(CapabilityFlag::NoFlag);
 
-            env.expect("e");
-            env.type("e");
+            env.type("a");
+            env.type("6");
 
-            env.expect("x");
-            env.type("x");
+            env.expect("â ");
+            env.type("space");
 
             ic->setCapabilityFlags(CapabilityFlag::SurroundingText);
         }
@@ -1207,6 +1208,34 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
 
             env.expect("cá");
             env.type("1");
+        }
+
+        // --- Case 37: LibreOffice disables immediate commit entirely ---
+        if (shouldRunCase(selCopy, 37)) {
+            announceCase(37);
+            FCITX_INFO() << "testsurroundingtext: Case 37 - LibreOffice disables immediate commit";
+
+            auto uuidLibre =
+                testfrontend->call<ITestFrontend::createInputContext>("libreoffice");
+            auto *icLibre = instance->inputContextManager().findByUUID(uuidLibre);
+            FCITX_ASSERT(icLibre);
+            icLibre->setCapabilityFlags(CapabilityFlag::SurroundingText);
+            TestEnv libreEnv{testfrontend, uuidLibre, icLibre};
+
+            libreEnv.type("Control+space");
+
+            RawConfig cfg = base;
+            cfg.setValueByPath("ImmediateCommit", "True");
+            cfg.setValueByPath("ModifySurroundingText", "False");
+            configureUnikey(unikey, cfg);
+
+            libreEnv.resetIC();
+
+            libreEnv.type("a");
+            libreEnv.type("6");
+
+            libreEnv.expect("â ");
+            libreEnv.type("space");
         }
 
         instance->deactivate();

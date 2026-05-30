@@ -110,7 +110,8 @@ static std::string itemsToUtf8(const std::vector<RebuildItem> &items) {
 // This is used to detect when surrounding text becomes reliable again while we
 // are in the "unreliable" state (where we must not rewrite/delete text).
 static size_t probeWordLengthFromSurrounding(const SurroundingText &st) {
-    if (!st.isValid() || !st.selectedText().empty()) {
+    if (!st.isValid() ||
+        (st.cursor() != st.anchor() || !st.selectedText().empty())) {
         return 0;
     }
 
@@ -199,7 +200,7 @@ void UnikeyState::rebuildFromSurroundingText() {
     // If there is an active selection, avoid rebuilding state.
     // The application will typically replace the selection on commit, and
     // rebuilding would corrupt surrounding text or cause double characters.
-    if (!ic_->surroundingText().selectedText().empty()) {
+    if (hasActiveSelection()) {
         FCITX_UNIKEY_DEBUG() << "[rebuildFromSurroundingText] Text selected, avoiding rebuild";
         return;
     }
@@ -278,8 +279,7 @@ size_t UnikeyState::rebuildStateFromSurrounding(bool deleteSurrounding) {
     // If there is an active selection, avoid rebuild/delete/recommit logic.
     // The application will typically replace the selection on commit, and
     // rebuilding would corrupt surrounding text.
-    if (ic_->surroundingText().isValid() &&
-        !ic_->surroundingText().selectedText().empty()) {
+    if (hasActiveSelection()) {
         return 0;
     }
 
@@ -468,8 +468,7 @@ size_t UnikeyState::rebuildStateFromSurrounding(bool deleteSurrounding) {
 
 size_t UnikeyState::rebuildStateFromLastImmediateWord(bool deleteSurrounding, KeySym upcomingSym) {
     // Don't rebuild if there's an active selection
-    if (ic_->surroundingText().isValid() &&
-        !ic_->surroundingText().selectedText().empty()) {
+    if (hasActiveSelection()) {
         return 0;
     }
 

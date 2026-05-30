@@ -222,6 +222,12 @@ bool UnikeyState::immediateCommitMode() const {
     if (*this->engine_->config().oc != UkConv::XUTF8) {
         return false;
     }
+
+    if (!ic_->capabilityFlags().test(CapabilityFlag::SurroundingText) ||
+        isUnsupportedSurroundingApp()) {
+        return false;
+    }
+
     return true;
 }
 
@@ -249,6 +255,7 @@ void UnikeyState::reset() {
     preeditStr_.clear();
     keyStrokes_.clear();
     rawAsciiRebuiltFromSurrounding_ = false;
+    restoreRawOnNextCommit_ = false;
     updatePreedit();
     lastShiftPressed_ = FcitxKey_None;
 
@@ -297,6 +304,18 @@ bool UnikeyState::restorePreeditToRawKeystrokesIfAvailable() {
     return true;
 }
 
+bool UnikeyState::restorePreeditToRawAvailableHistory() {
+    if (!keyStrokes_.empty()) {
+        return restorePreeditToRawKeystrokesIfAvailable();
+    }
+
+    if (!restoreImmediateCommitSession()) {
+        return false;
+    }
+
+    return restorePreeditToRawKeystrokesIfAvailable();
+}
+
 void UnikeyState::clearImmediateCommitSession() {
     immediateCommitWord_.clear();
     immediateCommitWordCharCount_ = 0;
@@ -307,11 +326,18 @@ bool UnikeyState::hasImmediateCommitSession() const {
     return !immediateCommitKeyStrokes_.empty() || !immediateCommitWord_.empty();
 }
 
+bool UnikeyState::hasActiveSelection(const SurroundingText &st) {
+    return st.isValid() &&
+           (st.cursor() != st.anchor() || !st.selectedText().empty());
+}
+
+bool UnikeyState::hasActiveSelection() const {
+    return hasActiveSelection(ic_->surroundingText());
+}
+
 bool UnikeyState::canRewriteImmediateCommit() const {
     return ic_->capabilityFlags().test(CapabilityFlag::SurroundingText) &&
-           !isUnsupportedSurroundingApp() &&
-           (!ic_->surroundingText().isValid() ||
-            ic_->surroundingText().selectedText().empty());
+           !isUnsupportedSurroundingApp() && !hasActiveSelection();
 }
 
 void UnikeyState::replayImmediateCommitKeyStroke(const ImmediateCommitKeyStroke &stroke) {
@@ -398,7 +424,10 @@ void UnikeyState::commitImmediateDiff(const std::string &oldWord,
 
         if (fallbackSym != FcitxKey_None && fallbackSym != FcitxKey_Shift_L &&
             fallbackSym != FcitxKey_Shift_R) {
-            commitStringTracked(utf8::UCS4ToUTF8(fallbackSym));
+            FCITX_UNIKEY_DEBUG()
+                << "[commitImmediateDiff] rewrite unavailable for non-append change; "
+                   "dropping fallback key to avoid raw-key corruption sym="
+                << fallbackSym;
         }
         return;
     }
@@ -531,8 +560,7 @@ void UnikeyState::preedit(KeyEvent &keyEvent, bool allowImmediateCommitForThisKe
         } else if (st.isValid()) {
             const int actual = static_cast<int>(st.cursor());
             const int anchor = static_cast<int>(st.anchor());
-            const bool hasSelection =
-                actual != anchor || !st.selectedText().empty();
+            const bool hasSelection = hasActiveSelection(st);
             auto preeditLen = utf8::lengthValidated(preeditStr_);
             const int preeditChars =
                 preeditLen == utf8::INVALID_LENGTH ? -1
@@ -622,7 +650,7 @@ void UnikeyState::preedit(KeyEvent &keyEvent, bool allowImmediateCommitForThisKe
         keyEvent.rawKey().check(FcitxKey_Shift_R)) {
         // If we don't have any buffered keystrokes, there is nothing meaningful
         // to restore. Avoid arming the Shift+Shift sequence in that case.
-        if (keyStrokes_.empty()) {
+        if (keyStrokes_.empty() && !hasImmediateCommitSession()) {
             lastShiftPressed_ = FcitxKey_None;
             return;
         }
@@ -631,10 +659,12 @@ void UnikeyState::preedit(KeyEvent &keyEvent, bool allowImmediateCommitForThisKe
         } else {
             // A second shift press (same or different) triggers restore.
             FCITX_UNIKEY_DEBUG() << "[keyEvent] Shift+Shift restoreKeyStrokes, preedit=\"" << preeditStr_ << "\"";
-            uic_.restoreKeyStrokes();
-            preeditStr_.clear();
-            syncState(FcitxKey_None);
-            updatePreedit();
+            if (restorePreeditToRawAvailableHistory()) {
+                updatePreedit();
+                if (immediateCommitMode()) {
+                    restoreRawOnNextCommit_ = true;
+                }
+            }
             lastShiftPressed_ = FcitxKey_None;
             keyEvent.filterAndAccept();
             return;
@@ -874,6 +904,9 @@ void UnikeyState::preedit(KeyEvent &keyEvent, bool allowImmediateCommitForThisKe
             // raw-commit preference and continue normal converted composition.
             rawAsciiRebuiltFromSurrounding_ = false;
         }
+        if (restoreRawOnNextCommit_ && sym != FcitxKey_space) {
+            restoreRawOnNextCommit_ = false;
+        }
 
         // process sym
 
@@ -925,11 +958,12 @@ void UnikeyState::preedit(KeyEvent &keyEvent, bool allowImmediateCommitForThisKe
             // "cá".
             const bool restoreRaw =
                 state.test(KeyState::Shift) ||
-                (!immediateCommit && rawAsciiRebuiltFromSurrounding_);
+                rawAsciiRebuiltFromSurrounding_ || restoreRawOnNextCommit_;
             if (restoreRaw) {
                 restorePreeditToRawKeystrokesIfAvailable();
             }
             rawAsciiRebuiltFromSurrounding_ = false;
+            restoreRawOnNextCommit_ = false;
             if (immediateCommit) {
                 if (restoreRaw) {
                     commitImmediateDiff(oldImmediateWord, preeditStr_);
