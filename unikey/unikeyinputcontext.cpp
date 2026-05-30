@@ -8,7 +8,6 @@
 #include "ukengine.h"
 #include "usrkeymap.h"
 #include <ctype.h>
-#include <iostream>
 #include <memory.h>
 #include <stdio.h>
 
@@ -88,14 +87,10 @@ UnikeyInputContext::UnikeyInputContext(UnikeyInputMethod *im) {
 //--------------------------------------------
 UnikeyInputContext::~UnikeyInputContext() {}
 
-#include <iostream>
 //--------------------------------------------
 void UnikeyInputContext::filter(unsigned int ch) {
     bufChars_ = sizeof(buf_);
     engine_.process(ch, backspaces_, buf_, bufChars_, output_);
-    if (ch != 0) {
-        std::cerr << "[uic::filter] ch=" << ch << " backs=" << backspaces_ << " bufChars=" << bufChars_ << " buf=\"" << (bufChars_ > 0 ? std::string((char*)buf_, bufChars_) : "") << "\"" << std::endl;
-    }
 }
 
 //--------------------------------------------
@@ -125,7 +120,6 @@ void UnikeyInputContext::backspacePress() {
 void UnikeyInputContext::restoreKeyStrokes() {
     bufChars_ = sizeof(buf_);
     engine_.restoreKeyStrokes(backspaces_, buf_, bufChars_, output_);
-    std::cerr << "[uic::restoreKeyStrokes] backs=" << backspaces_ << " bufChars=" << bufChars_ << " buf=\"" << (bufChars_ > 0 ? std::string((char*)buf_, bufChars_) : "") << "\"" << std::endl;
 }
 
 bool UnikeyInputContext::isAtWordBeginning() const {

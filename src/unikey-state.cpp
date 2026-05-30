@@ -37,7 +37,93 @@
 #include <fcitx/text.h>
 
 #include <iostream>
+#include <limits>
 namespace fcitx {
+
+namespace {
+
+std::string removeLastUtf8Char(const std::string &text, size_t charLen) {
+    if (charLen <= 1) {
+        return {};
+    }
+
+    auto byteLen = utf8::ncharByteLength(text.begin(), charLen - 1);
+    return text.substr(0, byteLen);
+}
+
+size_t commonUtf8PrefixChars(const std::string &a, const std::string &b) {
+    auto ia = a.begin();
+    auto ib = b.begin();
+    const auto ea = a.end();
+    const auto eb = b.end();
+    size_t count = 0;
+
+    while (ia != ea && ib != eb) {
+        uint32_t ca = 0;
+        uint32_t cb = 0;
+        auto na = utf8::getNextChar(ia, ea, &ca);
+        auto nb = utf8::getNextChar(ib, eb, &cb);
+        if (ca == utf8::INVALID_CHAR || ca == utf8::NOT_ENOUGH_SPACE ||
+            cb == utf8::INVALID_CHAR || cb == utf8::NOT_ENOUGH_SPACE ||
+            ca != cb) {
+            break;
+        }
+        ia = na;
+        ib = nb;
+        count++;
+    }
+
+    return count;
+}
+
+template <typename Simulate>
+int findStrokeForVisibleBackspace(size_t strokeCount,
+                                  const std::string &currentText,
+                                  Simulate simulate) {
+    const size_t currentLen = utf8::lengthValidated(currentText);
+    if (currentLen == utf8::INVALID_LENGTH || currentLen == 0 ||
+        strokeCount == 0) {
+        return -1;
+    }
+
+    const std::string target = removeLastUtf8Char(currentText, currentLen);
+    const size_t targetLen = currentLen - 1;
+
+    for (int remIdx = static_cast<int>(strokeCount) - 1; remIdx >= 0;
+         remIdx--) {
+        if (simulate(remIdx) == target) {
+            return remIdx;
+        }
+    }
+
+    int bestIdx = -1;
+    size_t bestDistance = std::numeric_limits<size_t>::max();
+    size_t bestPrefix = 0;
+    for (int remIdx = static_cast<int>(strokeCount) - 1; remIdx >= 0;
+         remIdx--) {
+        const std::string candidate = simulate(remIdx);
+        const size_t candidateLen = utf8::lengthValidated(candidate);
+        if (candidateLen == utf8::INVALID_LENGTH ||
+            candidateLen >= currentLen) {
+            continue;
+        }
+
+        const size_t distance = candidateLen > targetLen
+                                    ? candidateLen - targetLen
+                                    : targetLen - candidateLen;
+        const size_t prefix = commonUtf8PrefixChars(candidate, target);
+        if (bestIdx < 0 || distance < bestDistance ||
+            (distance == bestDistance && prefix > bestPrefix)) {
+            bestIdx = remIdx;
+            bestDistance = distance;
+            bestPrefix = prefix;
+        }
+    }
+
+    return bestIdx;
+}
+
+} // namespace
 
 UnikeyState::UnikeyState(UnikeyEngine *engine, InputContext *ic)
     : engine_(engine), uic_(engine->im()), ic_(ic) {}
@@ -127,7 +213,6 @@ bool UnikeyState::isFirefox() const {
 
 bool UnikeyState::immediateCommitMode() const {
     if (!*this->engine_->config().immediateCommit) {
-        FCITX_UNIKEY_DEBUG() << "[immediateCommitMode] Disabled in config";
         return false;
     }
 
@@ -135,11 +220,8 @@ bool UnikeyState::immediateCommitMode() const {
     // app-reported surrounding text. It only needs UTF-8 output so internal
     // character-count based rewrites are well defined.
     if (*this->engine_->config().oc != UkConv::XUTF8) {
-        FCITX_UNIKEY_DEBUG() << "[immediateCommitMode] Output charset is not XUTF8, is: "
-                             << static_cast<int>(*this->engine_->config().oc);
         return false;
     }
-    FCITX_UNIKEY_DEBUG() << "[immediateCommitMode] ENABLED (internal session mode)";
     return true;
 }
 
@@ -162,6 +244,7 @@ void UnikeyState::eraseChars(int num_chars) {
 }
 
 void UnikeyState::reset() {
+    FCITX_UNIKEY_DEBUG() << "[reset] resetBuf, clearing preedit=\"" << preeditStr_ << "\"";
     uic_.resetBuf();
     preeditStr_.clear();
     keyStrokes_.clear();
@@ -196,13 +279,16 @@ void UnikeyState::clearImmediateCommitHistory() {
 }
 
 bool UnikeyState::restorePreeditToRawKeystrokesIfAvailable() {
+    FCITX_UNIKEY_DEBUG() << "[restorePreeditToRaw] restoreKeyStrokes, preedit=\"" << preeditStr_ << "\"";
     uic_.restoreKeyStrokes();
     if (uic_.bufChars() <= 0) {
+        FCITX_UNIKEY_DEBUG() << "[restorePreeditToRaw] no output from restoreKeyStrokes";
         return false;
     }
 
     preeditStr_.clear();
     syncState(FcitxKey_None);
+    FCITX_UNIKEY_DEBUG() << "[restorePreeditToRaw] restored preedit=\"" << preeditStr_ << "\"";
     return true;
 }
 
@@ -225,8 +311,10 @@ bool UnikeyState::canRewriteImmediateCommit() const {
 
 void UnikeyState::replayImmediateCommitKeyStroke(const ImmediateCommitKeyStroke &stroke) {
     if (stroke.passThrough) {
+        FCITX_UNIKEY_DEBUG() << "[replayImmediate] putChar sym=" << stroke.sym;
         uic_.putChar(stroke.sym);
     } else {
+        FCITX_UNIKEY_DEBUG() << "[replayImmediate] filter sym=" << stroke.sym;
         uic_.filter(stroke.sym);
     }
     keyStrokes_.push_back(stroke.sym);
@@ -357,6 +445,7 @@ void UnikeyState::preedit(KeyEvent &keyEvent, bool allowImmediateCommitForThisKe
             lastShiftPressed_ = keyEvent.rawKey().sym();
         } else {
             // A second shift press (same or different) triggers restore.
+            FCITX_UNIKEY_DEBUG() << "[keyEvent] Shift+Shift restoreKeyStrokes, preedit=\"" << preeditStr_ << "\"";
             uic_.restoreKeyStrokes();
             preeditStr_.clear();
             syncState(FcitxKey_None);
@@ -409,16 +498,15 @@ void UnikeyState::preedit(KeyEvent &keyEvent, bool allowImmediateCommitForThisKe
                 currentLen = 0;
             }
 
-            do {
-                immediateCommitKeyStrokes_.pop_back();
+            FCITX_UNIKEY_DEBUG() << "[backspace] immediate-commit simulation, currentLen=" << currentLen
+                                 << " strokes=" << immediateCommitKeyStrokes_.size();
 
-                if (currentLen == 0) {
-                    break;
-                }
-
+            auto simulateImmediateStrokes = [&](int skipIdx) -> std::string {
                 uic_.resetBuf();
-                std::string tempStr;
-                for (const auto &stroke : immediateCommitKeyStrokes_) {
+                std::string result;
+                for (int j = 0; j < (int)immediateCommitKeyStrokes_.size(); j++) {
+                    if (j == skipIdx) continue;
+                    const auto &stroke = immediateCommitKeyStrokes_[j];
                     if (stroke.passThrough) {
                         uic_.putChar(stroke.sym);
                     } else {
@@ -427,34 +515,45 @@ void UnikeyState::preedit(KeyEvent &keyEvent, bool allowImmediateCommitForThisKe
                     if (uic_.backspaces() > 0) {
                         int k = uic_.backspaces();
                         int i;
-                        for (i = tempStr.length() - 1; i >= 0 && k > 0; i--) {
-                            unsigned char c = tempStr.at(i);
-                            if (c < 0x80 || c >= 0xC0) {
-                                k--;
-                            }
+                        for (i = (int)result.length() - 1; i >= 0 && k > 0; i--) {
+                            unsigned char c = (unsigned char)result[i];
+                            if (c < 0x80 || c >= 0xC0) k--;
                         }
-                        tempStr.erase(i + 1);
+                        result.erase(i + 1);
                     }
                     if (uic_.bufChars() > 0) {
-                        tempStr.append(reinterpret_cast<const char *>(uic_.buf()),
-                                       uic_.bufChars());
+                        result.append(reinterpret_cast<const char *>(uic_.buf()),
+                                      uic_.bufChars());
                     } else if (stroke.sym != FcitxKey_Shift_L &&
                                stroke.sym != FcitxKey_Shift_R &&
                                stroke.sym != FcitxKey_None) {
-                        tempStr.append(utf8::UCS4ToUTF8(stroke.sym));
+                        result.append(utf8::UCS4ToUTF8(stroke.sym));
                     }
                 }
+                return result;
+            };
 
-                auto newLen = utf8::lengthValidated(tempStr);
-                if (newLen == utf8::INVALID_LENGTH) {
-                    newLen = 0;
-                }
+            bool removedForTarget = false;
+            int remIdx = findStrokeForVisibleBackspace(
+                immediateCommitKeyStrokes_.size(), preeditStr_,
+                simulateImmediateStrokes);
+            if (remIdx >= 0) {
+                immediateCommitKeyStrokes_.erase(
+                    immediateCommitKeyStrokes_.begin() + remIdx);
+                removedForTarget = true;
+            }
 
-                if (newLen < currentLen) {
-                    break;
-                }
-            } while (!immediateCommitKeyStrokes_.empty());
+            if (!removedForTarget) {
+                do {
+                    immediateCommitKeyStrokes_.pop_back();
+                    if (currentLen == 0) break;
+                    auto newLen = utf8::lengthValidated(simulateImmediateStrokes(-1));
+                    if (newLen == utf8::INVALID_LENGTH) newLen = 0;
+                    if (newLen < currentLen) break;
+                } while (!immediateCommitKeyStrokes_.empty());
+            }
 
+            FCITX_UNIKEY_DEBUG() << "[backspace] immediate-commit rebuild, remaining strokes=" << immediateCommitKeyStrokes_.size();
             uic_.resetBuf();
             preeditStr_.clear();
             keyStrokes_.clear();
@@ -480,64 +579,72 @@ void UnikeyState::preedit(KeyEvent &keyEvent, bool allowImmediateCommitForThisKe
             currentLen = 0;
         }
 
-        // Loop to pop keystrokes until the number of characters decreases.
-        // This implements "delete whole character" behavior instead of
-        // "progressive undo" (which might just remove a tone).
-        do {
-            keyStrokes_.pop_back();
+        FCITX_UNIKEY_DEBUG() << "[backspace] preedit simulation, currentLen=" << currentLen
+                             << " strokes=" << keyStrokes_.size();
 
-            // If we started with nothing visible (or invalid), popping one key
-            // is enough.
-            if (currentLen == 0) {
-                break;
-            }
-
-            // Simulate the new state to check length
+        // Simulate replaying keyStrokes_, skipping element at skipIdx (-1 = skip none).
+        // Used both for the single-removal search and the fallback pop loop.
+        auto simulatePreeditStrokes = [&](int skipIdx) -> std::string {
             uic_.resetBuf();
-            std::string tempStr;
-            for (auto s : keyStrokes_) {
+            std::string result;
+            for (int j = 0; j < (int)keyStrokes_.size(); j++) {
+                if (j == skipIdx) continue;
+                auto s = keyStrokes_[j];
                 uic_.filter(s);
-                // Replicate syncState logic for string construction
                 if (uic_.backspaces() > 0) {
                     int k = uic_.backspaces();
                     int i;
-                    for (i = tempStr.length() - 1; i >= 0 && k > 0; i--) {
-                        unsigned char c = tempStr.at(i);
-                        if (c < 0x80 || c >= 0xC0) {
-                            k--;
-                        }
+                    for (i = (int)result.length() - 1; i >= 0 && k > 0; i--) {
+                        unsigned char c = (unsigned char)result[i];
+                        if (c < 0x80 || c >= 0xC0) k--;
                     }
-                    tempStr.erase(i + 1);
+                    result.erase(i + 1);
                 }
                 if (uic_.bufChars() > 0) {
                     if (*this->engine_->config().oc == UkConv::XUTF8) {
-                        tempStr.append(
-                            reinterpret_cast<const char *>(uic_.buf()),
-                            uic_.bufChars());
+                        result.append(reinterpret_cast<const char *>(uic_.buf()),
+                                      uic_.bufChars());
                     } else {
                         unsigned char buf[CONVERT_BUF_SIZE + 1];
                         int bufSize = CONVERT_BUF_SIZE;
                         latinToUtf(buf, uic_.buf(), uic_.bufChars(), &bufSize);
-                        tempStr.append((const char *)buf,
-                                       CONVERT_BUF_SIZE - bufSize);
+                        result.append((const char *)buf, CONVERT_BUF_SIZE - bufSize);
                     }
                 } else if (s != FcitxKey_Shift_L && s != FcitxKey_Shift_R &&
                            s != FcitxKey_None) {
-                    tempStr.append(utf8::UCS4ToUTF8(s));
+                    result.append(utf8::UCS4ToUTF8(s));
                 }
             }
+            return result;
+        };
 
-            auto newLen = utf8::lengthValidated(tempStr);
-            if (newLen == utf8::INVALID_LENGTH) {
-                newLen = 0;
-            }
+        // Prefer deleting the stroke that produces the visible text with its
+        // last character removed. This handles cases where a tone modifier sits
+        // after the final consonant (e.g. VNI "cán" = [c,a,n,1]: removing 'n'
+        // while keeping '1' yields "cá" instead of "ca").
+        bool removedForTarget = false;
+        int remIdx = findStrokeForVisibleBackspace(keyStrokes_.size(),
+                                                   preeditStr_,
+                                                   simulatePreeditStrokes);
+        if (remIdx >= 0) {
+            keyStrokes_.erase(keyStrokes_.begin() + remIdx);
+            removedForTarget = true;
+        }
 
-            if (newLen < currentLen) {
-                break;
-            }
+        if (!removedForTarget) {
+            // Fallback: pop from back until the character count decreases.
+            // Handles multi-key single-character sequences (e.g. Telex "aas" → "ấ")
+            // where no single removal produces the target.
+            do {
+                keyStrokes_.pop_back();
+                if (currentLen == 0) break;
+                auto newLen = utf8::lengthValidated(simulatePreeditStrokes(-1));
+                if (newLen == utf8::INVALID_LENGTH) newLen = 0;
+                if (newLen < currentLen) break;
+            } while (!keyStrokes_.empty());
+        }
 
-        } while (!keyStrokes_.empty());
-
+        FCITX_UNIKEY_DEBUG() << "[backspace] preedit rebuild, remaining strokes=" << keyStrokes_.size();
         uic_.resetBuf();
         preeditStr_.clear();
         for (auto s : keyStrokes_) {
@@ -561,6 +668,8 @@ void UnikeyState::preedit(KeyEvent &keyEvent, bool allowImmediateCommitForThisKe
     }
     if (sym >= FcitxKey_space && sym <= FcitxKey_asciitilde) {
         // capture ascii printable char
+        FCITX_UNIKEY_DEBUG() << "[keyEvent] setCapsState shift=" << state.test(KeyState::Shift)
+                             << " capsLock=" << state.test(KeyState::CapsLock);
         uic_.setCapsState(state.test(KeyState::Shift),
                           state.test(KeyState::CapsLock));
 
@@ -648,11 +757,14 @@ void UnikeyState::preedit(KeyEvent &keyEvent, bool allowImmediateCommitForThisKe
         }
 
         // shift + shift event (two different shift keys, no space)
+        FCITX_UNIKEY_DEBUG() << "[keyEvent] filter sym=" << sym << " preedit=\"" << preeditStr_ << "\"";
         uic_.filter(sym);
         keyStrokes_.push_back(sym);
         // end process sym
 
         syncState(sym);
+        FCITX_UNIKEY_DEBUG() << "[keyEvent] after filter: backs=" << uic_.backspaces()
+                             << " bufChars=" << uic_.bufChars() << " preedit=\"" << preeditStr_ << "\"";
 
         if (immediateCommit) {
             FCITX_UNIKEY_DEBUG() << "[preedit] ImmediateCommit: committing \"" << preeditStr_ << "\"";
@@ -689,6 +801,7 @@ void UnikeyState::preedit(KeyEvent &keyEvent, bool allowImmediateCommitForThisKe
 }
 
 void UnikeyState::handleIgnoredKey() {
+    FCITX_UNIKEY_DEBUG() << "[handleIgnoredKey] filter(0), flushing preedit=\"" << preeditStr_ << "\"";
     uic_.filter(0);
     syncState();
 

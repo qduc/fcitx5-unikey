@@ -85,6 +85,8 @@ void printCases() {
     std::cout << " 29: Immediate commit keeps raw Telex word with repeated tone keys\n";
     std::cout << " 30: Immediate commit without surrounding capability avoids whole-word duplication\n";
     std::cout << " 31: ImmediateCommit ignores obviously stale surrounding text\n";
+    std::cout << " 32: Immediate commit backspace after late VNI modifiers\n";
+    std::cout << " 33: Immediate commit backspace after interleaved VNI modifiers\n";
 }
 
 void announceCase(int id) {
@@ -1046,6 +1048,128 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             ic->updateSurroundingText();
             testfrontend->call<ITestFrontend::pushCommitExpectation>("tôi");
             testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("6"), false);
+        }
+
+        // --- Case 32: Immediate commit backspace after late VNI modifiers ---
+        // "nguyen64" commits as "nguyễn"; Backspace should remove the visible
+        // final consonant while preserving the shape/tone modifiers.
+        if (shouldRunCase(selCopy, 32)) {
+            announceCase(32);
+            FCITX_INFO() << "testsurroundingtext: Case 32 - Immediate backspace after late VNI modifiers";
+            RawConfig cfg = base;
+            cfg.setValueByPath("ImmediateCommit", "True");
+            cfg.setValueByPath("ModifySurroundingText", "False");
+            cfg.setValueByPath("InputMethod", "VNI");
+            configureUnikey(unikey, cfg);
+
+            ic->reset();
+            ic->surroundingText().setText("", 0, 0);
+            ic->updateSurroundingText();
+
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("n");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("n"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("ng");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("g"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("ngu");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("u"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("nguy");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("y"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("nguye");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("e"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("nguyen");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("n"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("nguyên");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("6"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("nguyễn");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("4"), false);
+
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("nguyễ");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("BackSpace"), false);
+
+            ic->reset();
+            ic->surroundingText().setText("", 0, 0);
+            ic->updateSurroundingText();
+
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("n");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("n"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("ng");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("g"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("ngu");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("u"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("nguy");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("y"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("nguye");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("e"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("nguyê");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("6"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("nguyễ");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("4"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("nguyễn");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("n"), false);
+
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("nguyễ");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("BackSpace"), false);
+        }
+
+        // --- Case 33: Immediate commit backspace after interleaved VNI modifiers ---
+        // "truo7ng2" commits as "trường"; Backspace should remove the visible
+        // final 'g' while keeping the horn and tone modifiers.
+        if (shouldRunCase(selCopy, 33)) {
+            announceCase(33);
+            FCITX_INFO() << "testsurroundingtext: Case 33 - Immediate backspace after interleaved VNI modifiers";
+            RawConfig cfg = base;
+            cfg.setValueByPath("ImmediateCommit", "True");
+            cfg.setValueByPath("ModifySurroundingText", "False");
+            cfg.setValueByPath("InputMethod", "VNI");
+            configureUnikey(unikey, cfg);
+
+            ic->reset();
+            ic->surroundingText().setText("", 0, 0);
+            ic->updateSurroundingText();
+
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("t");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("t"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("tr");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("r"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("tru");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("u"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("truo");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("o"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("trươ");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("7"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("trươn");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("n"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("trương");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("g"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("trường");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("2"), false);
+
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("trườn");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("BackSpace"), false);
+
+            ic->reset();
+            ic->surroundingText().setText("", 0, 0);
+            ic->updateSurroundingText();
+
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("t");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("t"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("tr");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("r"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("tru");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("u"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("truo");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("o"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("truon");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("n"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("truong");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("g"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("trương");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("7"), false);
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("trường");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("2"), false);
+
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("trườn");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("BackSpace"), false);
         }
 
         instance->deactivate();

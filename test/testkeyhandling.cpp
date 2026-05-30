@@ -71,6 +71,10 @@ void printCases() {
     std::cout << " 16: Telex double-typing undo survives space\n";
     std::cout << " 17: VNI digit before space commits converted input\n";
     std::cout << " 18: Immediate commit preserves raw word-initial w replay when ProcessWAtBegin=False\n";
+    std::cout << " 19: Backspace after tone-then-consonant in preedit (VNI)\n";
+    std::cout << " 20: Backspace after tone-then-consonant in preedit (Telex)\n";
+    std::cout << " 21: Backspace after late VNI modifiers in preedit\n";
+    std::cout << " 22: Backspace after interleaved VNI modifiers in preedit\n";
 }
 
 void announceCase(int id) {
@@ -548,6 +552,134 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
 
             config.setValueByPath("ProcessWAtBegin", "True");
             setTestConfig(unikey, config);
+        }
+
+        // --- Test: Backspace after tone-then-consonant in preedit (VNI) ---
+        // VNI "cán" is typed c,a,n,1 (tone digit after final consonant).
+        // Backspace should delete 'n' and yield "cá", not strip the tone to "ca".
+        if (shouldRunCase(selCopy, 19)) {
+            announceCase(19);
+            FCITX_INFO() << "testkeyhandling: Case 19 - Backspace after tone-then-consonant (VNI)";
+            config.setValueByPath("ImmediateCommit", "False");
+            config.setValueByPath("InputMethod", "VNI");
+            setTestConfig(unikey, config);
+
+            ic->reset();
+            ic->surroundingText().setText("", 0, 0);
+            ic->updateSurroundingText();
+
+            // Type c, a, n, 1 → preedit "cán"
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("c"), false);
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("n"), false);
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("1"), false);
+
+            // Backspace: delete 'n', keep tone → "cá"
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("BackSpace"), false);
+
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("cá ");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
+        }
+
+        // --- Test: Backspace after tone-then-consonant in preedit (Telex) ---
+        // Telex "cán" typed c,a,n,s (tone letter 's' typed after consonant 'n').
+        // Backspace should delete 'n' and yield "cá".
+        if (shouldRunCase(selCopy, 20)) {
+            announceCase(20);
+            FCITX_INFO() << "testkeyhandling: Case 20 - Backspace after tone-then-consonant (Telex)";
+            config.setValueByPath("ImmediateCommit", "False");
+            config.setValueByPath("InputMethod", "Telex");
+            setTestConfig(unikey, config);
+
+            ic->reset();
+            ic->surroundingText().setText("", 0, 0);
+            ic->updateSurroundingText();
+
+            // Type c, a, n, s → preedit "cán" (Telex: 's' = sắc tone)
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("c"), false);
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("a"), false);
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("n"), false);
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("s"), false);
+
+            // Backspace: delete 'n', keep tone → "cá"
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("BackSpace"), false);
+
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("cá ");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
+        }
+
+        // --- Test: Backspace after late VNI modifiers in preedit ---
+        // VNI "nguyen64" applies shape/tone after the final consonant. Backspace
+        // should remove the visible final 'n', not the late modifier keys.
+        if (shouldRunCase(selCopy, 21)) {
+            announceCase(21);
+            FCITX_INFO() << "testkeyhandling: Case 21 - Backspace after late VNI modifiers";
+            config.setValueByPath("ImmediateCommit", "False");
+            config.setValueByPath("InputMethod", "VNI");
+            setTestConfig(unikey, config);
+
+            ic->reset();
+            ic->surroundingText().setText("", 0, 0);
+            ic->updateSurroundingText();
+
+            for (const char *key : {"n", "g", "u", "y", "e", "n", "6", "4"}) {
+                testfrontend->call<ITestFrontend::keyEvent>(uuid, Key(key), false);
+            }
+
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("BackSpace"), false);
+
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("nguyễ ");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
+
+            ic->reset();
+            ic->surroundingText().setText("", 0, 0);
+            ic->updateSurroundingText();
+
+            for (const char *key : {"n", "g", "u", "y", "e", "6", "4", "n"}) {
+                testfrontend->call<ITestFrontend::keyEvent>(uuid, Key(key), false);
+            }
+
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("BackSpace"), false);
+
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("nguyễ ");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
+        }
+
+        // --- Test: Backspace after interleaved VNI modifiers in preedit ---
+        // VNI "truo7ng2" applies the horn before final consonants and tone after
+        // them. Backspace should remove 'g' while preserving both modifiers.
+        if (shouldRunCase(selCopy, 22)) {
+            announceCase(22);
+            FCITX_INFO() << "testkeyhandling: Case 22 - Backspace after interleaved VNI modifiers";
+            config.setValueByPath("ImmediateCommit", "False");
+            config.setValueByPath("InputMethod", "VNI");
+            setTestConfig(unikey, config);
+
+            ic->reset();
+            ic->surroundingText().setText("", 0, 0);
+            ic->updateSurroundingText();
+
+            for (const char *key : {"t", "r", "u", "o", "7", "n", "g", "2"}) {
+                testfrontend->call<ITestFrontend::keyEvent>(uuid, Key(key), false);
+            }
+
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("BackSpace"), false);
+
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("trườn ");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
+
+            ic->reset();
+            ic->surroundingText().setText("", 0, 0);
+            ic->updateSurroundingText();
+
+            for (const char *key : {"t", "r", "u", "o", "n", "g", "7", "2"}) {
+                testfrontend->call<ITestFrontend::keyEvent>(uuid, Key(key), false);
+            }
+
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("BackSpace"), false);
+
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("trườn ");
+            testfrontend->call<ITestFrontend::keyEvent>(uuid, Key("space"), false);
         }
 
         instance->deactivate();
