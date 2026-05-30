@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
-# Simple test runner with automatic case-level retry on failure
+# Simple test runner
 # Usage: Just run it from anywhere in the project
 #   scripts/test.sh           # Brief summary mode
 #   scripts/test.sh -v        # Verbose mode (show all output)
+#
+# Re-run a single failing case with debug output:
+#   ./bin/<testname> --case <N>
 
 set -euo pipefail
 
@@ -72,109 +75,26 @@ if [[ ${#failed_tests[@]} -eq 0 ]]; then
 fi
 
 echo
-echo "Failed tests: ${#failed_tests[@]}"
-declare -a case_logs=()
-
-# Try to isolate failing cases
+echo
 for test_name in "${failed_tests[@]}"; do
-    echo -e "${BLUE}→ Analyzing: $test_name${NC}"
-    exec_name="$test_name"
-    force_immediate=0
-    if [[ "$exec_name" == *-immediate ]]; then
-        exec_name="${exec_name%-immediate}"
-        force_immediate=1
-    fi
-
-    # Get the test log
-    log_file="Testing/Temporary/LastTest.log"
-    if [[ ! -f "$log_file" ]]; then
-        echo "  No log file found"
-        continue
-    fi
-
-    # Detect failing case number (pattern: "testname: Case N")
-    case_id=""
-    while IFS= read -r line; do
-        if [[ "$line" =~ $exec_name:[[:space:]]*Case[[:space:]]+([0-9]+) ]]; then
-            case_id="${BASH_REMATCH[1]}"
-        fi
-    done < "$log_file"
-
-    if [[ -z "$case_id" ]]; then
-        echo "  Could not detect specific failing case"
-        continue
-    fi
-
-    echo "  Detected failing case: $case_id"
-
-    # Find test executable
-    if [[ ! -f "bin/$exec_name" ]]; then
-        echo "  Warning: Cannot find test executable at bin/$exec_name"
-        continue
-    fi
-
-    # Run the specific case and save to log
-    case_log="$LOGS_DIR/${test_name}.case${case_id}.log"
-    echo "  Rerunning case $case_id..."
-
-    if [[ $VERBOSE -eq 1 ]]; then
-        echo
-        if [[ $force_immediate -eq 1 ]]; then
-            FCITX_UNIKEY_TEST_FORCE_IMMEDIATE_COMMIT=1 ./bin/"$exec_name" --case "$case_id" 2>&1 | tee "$case_log" || true
-        else
-            ./bin/"$exec_name" --case "$case_id" 2>&1 | tee "$case_log" || true
-        fi
-        echo
-    else
-        if [[ $force_immediate -eq 1 ]]; then
-            FCITX_UNIKEY_TEST_FORCE_IMMEDIATE_COMMIT=1 ./bin/"$exec_name" --case "$case_id" > "$case_log" 2>&1 || true
-        else
-            ./bin/"$exec_name" --case "$case_id" > "$case_log" 2>&1 || true
-        fi
-        echo "  Log saved: $case_log"
-
-        # Show just the failure line
-        if grep -q "failed\|FAILED\|Failed" "$case_log"; then
-            echo -e "  ${RED}✗ Case $case_id failed${NC}"
-            grep -m1 "failed\|FAILED\|Failed" "$case_log" | sed 's/^/    /' || true
-        fi
-    fi
-
-    case_logs+=("$case_log")
+    echo -e "  ${RED}✗${NC} $test_name"
 done
 
 echo
-if [[ ${#case_logs[@]} -gt 0 ]]; then
-    echo -e "${YELLOW}Detailed logs saved in:${NC} $LOGS_DIR"
-    echo
-    echo "To rerun a specific failing case with full output:"
-    for log in "${case_logs[@]}"; do
-        # Extract test name and case number from log filename
-        # Format: testsurroundingtext.case1.log
-        basename_log=$(basename "$log")
-        if [[ "$basename_log" =~ ^(.+)\.case([0-9]+)\.log$ ]]; then
-            test_name="${BASH_REMATCH[1]}"
-            case_num="${BASH_REMATCH[2]}"
-            exec_name="$test_name"
-            env_prefix=""
-            if [[ "$exec_name" == *-immediate ]]; then
-                exec_name="${exec_name%-immediate}"
-                env_prefix="FCITX_UNIKEY_TEST_FORCE_IMMEDIATE_COMMIT=1 "
-            fi
-            echo -e "  ${BLUE}${env_prefix}./bin/$exec_name --case $case_num${NC}"
-        fi
-    done
-    echo
-    echo "To view saved logs:"
-    for log in "${case_logs[@]}"; do
-        echo "  cat $LOGS_DIR/$(basename "$log")"
-    done
-    echo
-    if [[ $VERBOSE -eq 0 ]]; then
-        echo "Or run with -v to see full output immediately: scripts/test.sh -v"
+echo "To rerun a specific failing test with full output:"
+for test_name in "${failed_tests[@]}"; do
+    exec_name="$test_name"
+    env_prefix=""
+    if [[ "$exec_name" == *-immediate ]]; then
+        exec_name="${exec_name%-immediate}"
+        env_prefix="FCITX_UNIKEY_TEST_FORCE_IMMEDIATE_COMMIT=1 "
     fi
-fi
+    if [[ -x "bin/$exec_name" ]]; then
+        echo -e "  ${BLUE}${env_prefix}./bin/$exec_name${NC}"
+        echo "    (add --case <N> to run a specific case with full debug output)"
+    fi
+done
 
 echo
-echo -e "${RED}Tests failed.${NC}"
+echo -e "${RED}Tests failed: ${#failed_tests[@]}${NC}"
 exit 1
