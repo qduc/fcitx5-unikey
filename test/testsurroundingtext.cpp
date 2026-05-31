@@ -92,6 +92,7 @@ void printCases() {
     std::cout << " 35: Immediate re-edit: Left arrow back to word, then VNI tone\n";
     std::cout << " 36: Immediate re-edit: BackSpace to word, then VNI tone\n";
     std::cout << " 37: LibreOffice disables immediate commit fallback to preedit\n";
+    std::cout << " 38: Immediate re-edit preserves rebuilt Vietnamese chars\n";
 }
 
 void announceCase(int id) {
@@ -1236,6 +1237,28 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
 
             libreEnv.expect("â ");
             libreEnv.type("space");
+        }
+
+        // --- Case 38: Immediate re-edit preserves rebuilt Vietnamese chars ---
+        // Regression: rebuildStateFromSurrounding() can rebuild non-ASCII
+        // Vietnamese chars with rebuildChar(), but there is no original ASCII
+        // keystroke to put into keyStrokes_. Immediate session replay must keep
+        // those rebuilt chars; otherwise "ành" restores as only "nh" and VNI
+        // "1" is appended literally as "nh1".
+        if (shouldRunCase(selCopy, 38)) {
+            announceCase(38);
+            FCITX_INFO() << "testsurroundingtext: Case 38 - Immediate re-edit preserves rebuilt Vietnamese chars";
+            RawConfig cfg = base;
+            cfg.setValueByPath("ImmediateCommit", "True");
+            cfg.setValueByPath("ModifySurroundingText", "False");
+            cfg.setValueByPath("InputMethod", "VNI");
+            configureUnikey(unikey, cfg);
+
+            env.resetIC();
+            env.setSurrounding("ành", 3);
+
+            env.expect("ánh");
+            env.type("1");
         }
 
         instance->deactivate();

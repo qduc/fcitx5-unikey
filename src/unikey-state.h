@@ -10,7 +10,9 @@
 #include <fcitx/inputcontextproperty.h>
 #include <fcitx/event.h>
 #include <fcitx-utils/keysym.h>
+#include <fcitx/surroundingtext.h>
 #include "unikeyinputcontext.h"
+#include "vnlexi.h"
 #include <string>
 #include <vector>
 
@@ -24,6 +26,8 @@ public:
     struct ImmediateCommitKeyStroke {
         KeySym sym = FcitxKey_None;
         bool passThrough = false;
+        bool rebuiltVnChar = false;
+        VnLexiName vn = vnl_nonVnChar;
     };
 
     UnikeyState(UnikeyEngine *engine, InputContext *ic);
@@ -119,6 +123,9 @@ private:
     bool hasImmediateCommitSession() const;
     void replayImmediateCommitKeyStroke(const ImmediateCommitKeyStroke &stroke);
     bool tryReeditImmediateFromSurrounding(KeySym sym);
+    void setRebuiltImmediateReplayStrokes(
+        std::vector<ImmediateCommitKeyStroke> strokes,
+        size_t keyStrokeCount);
 
     // DEFERRED-DECISION flag. True when the visible preedit is a re-converted
     // view of external raw-ASCII text pulled from surrounding text. Rebuild
@@ -155,6 +162,8 @@ private:
     std::string immediateCommitWord_;
     size_t immediateCommitWordCharCount_ = 0;
     std::vector<ImmediateCommitKeyStroke> immediateCommitKeyStrokes_;
+    std::vector<ImmediateCommitKeyStroke> rebuiltImmediateReplayStrokes_;
+    size_t rebuiltImmediateReplayKeyStrokeCount_ = 0;
 };
 
 } // namespace fcitx

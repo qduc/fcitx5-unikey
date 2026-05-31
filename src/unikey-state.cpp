@@ -320,6 +320,8 @@ void UnikeyState::clearImmediateCommitSession() {
     immediateCommitWord_.clear();
     immediateCommitWordCharCount_ = 0;
     immediateCommitKeyStrokes_.clear();
+    rebuiltImmediateReplayStrokes_.clear();
+    rebuiltImmediateReplayKeyStrokeCount_ = 0;
 }
 
 bool UnikeyState::hasImmediateCommitSession() const {
@@ -341,15 +343,28 @@ bool UnikeyState::canRewriteImmediateCommit() const {
 }
 
 void UnikeyState::replayImmediateCommitKeyStroke(const ImmediateCommitKeyStroke &stroke) {
-    if (stroke.passThrough) {
+    if (stroke.rebuiltVnChar) {
+        FCITX_UNIKEY_DEBUG() << "[replayImmediate] rebuildChar vn=" << stroke.vn;
+        uic_.rebuildChar(stroke.vn);
+        syncState();
+    } else if (stroke.passThrough) {
         FCITX_UNIKEY_DEBUG() << "[replayImmediate] putChar sym=" << stroke.sym;
         uic_.putChar(stroke.sym);
+        keyStrokes_.push_back(stroke.sym);
+        syncState(stroke.sym);
     } else {
         FCITX_UNIKEY_DEBUG() << "[replayImmediate] filter sym=" << stroke.sym;
         uic_.filter(stroke.sym);
+        keyStrokes_.push_back(stroke.sym);
+        syncState(stroke.sym);
     }
-    keyStrokes_.push_back(stroke.sym);
-    syncState(stroke.sym);
+}
+
+void UnikeyState::setRebuiltImmediateReplayStrokes(
+    std::vector<ImmediateCommitKeyStroke> strokes,
+    size_t keyStrokeCount) {
+    rebuiltImmediateReplayStrokes_ = std::move(strokes);
+    rebuiltImmediateReplayKeyStrokeCount_ = keyStrokeCount;
 }
 
 bool UnikeyState::restoreImmediateCommitSession() {
@@ -364,6 +379,8 @@ bool UnikeyState::restoreImmediateCommitSession() {
     for (const auto &stroke : immediateCommitKeyStrokes_) {
         replayImmediateCommitKeyStroke(stroke);
     }
+    rebuiltImmediateReplayStrokes_ = immediateCommitKeyStrokes_;
+    rebuiltImmediateReplayKeyStrokeCount_ = keyStrokes_.size();
     return true;
 }
 
@@ -501,15 +518,55 @@ void UnikeyState::updateImmediateCommitSessionFromPreedit(int forcePassThroughIn
     immediateCommitWord_ = preeditStr_;
     immediateCommitWordCharCount_ = charLen;
     std::vector<ImmediateCommitKeyStroke> updatedStrokes;
+    if (!rebuiltImmediateReplayStrokes_.empty() &&
+        keyStrokes_.size() >= rebuiltImmediateReplayKeyStrokeCount_) {
+        updatedStrokes = rebuiltImmediateReplayStrokes_;
+        for (size_t i = rebuiltImmediateReplayKeyStrokeCount_;
+             i < keyStrokes_.size(); ++i) {
+            const auto sym = keyStrokes_[i];
+            const bool preservePassThrough =
+                static_cast<int>(i) == forcePassThroughIndex;
+            updatedStrokes.push_back(
+                {sym, preservePassThrough, false, vnl_nonVnChar});
+        }
+        immediateCommitKeyStrokes_ = std::move(updatedStrokes);
+        return;
+    }
+
+    std::vector<KeySym> previousKeySyms;
+    previousKeySyms.reserve(immediateCommitKeyStrokes_.size());
+    for (const auto &stroke : immediateCommitKeyStrokes_) {
+        if (!stroke.rebuiltVnChar) {
+            previousKeySyms.push_back(stroke.sym);
+        }
+    }
+    if (!immediateCommitKeyStrokes_.empty() &&
+        keyStrokes_.size() >= previousKeySyms.size() &&
+        std::equal(previousKeySyms.begin(), previousKeySyms.end(),
+                   keyStrokes_.begin())) {
+        updatedStrokes = immediateCommitKeyStrokes_;
+        for (size_t i = previousKeySyms.size(); i < keyStrokes_.size(); ++i) {
+            const auto sym = keyStrokes_[i];
+            const bool preservePassThrough =
+                static_cast<int>(i) == forcePassThroughIndex;
+            updatedStrokes.push_back(
+                {sym, preservePassThrough, false, vnl_nonVnChar});
+        }
+        immediateCommitKeyStrokes_ = std::move(updatedStrokes);
+        return;
+    }
+
     updatedStrokes.reserve(keyStrokes_.size());
     for (size_t i = 0; i < keyStrokes_.size(); ++i) {
         const auto sym = keyStrokes_[i];
         const bool preservePassThrough =
             static_cast<int>(i) == forcePassThroughIndex ||
             (i < immediateCommitKeyStrokes_.size() &&
+             !immediateCommitKeyStrokes_[i].rebuiltVnChar &&
              immediateCommitKeyStrokes_[i].sym == sym &&
              immediateCommitKeyStrokes_[i].passThrough);
-        updatedStrokes.push_back({sym, preservePassThrough});
+        updatedStrokes.push_back(
+            {sym, preservePassThrough, false, vnl_nonVnChar});
     }
     immediateCommitKeyStrokes_ = std::move(updatedStrokes);
 }
@@ -722,7 +779,9 @@ void UnikeyState::preedit(KeyEvent &keyEvent, bool allowImmediateCommitForThisKe
                 for (int j = 0; j < (int)immediateCommitKeyStrokes_.size(); j++) {
                     if (j == skipIdx) continue;
                     const auto &stroke = immediateCommitKeyStrokes_[j];
-                    if (stroke.passThrough) {
+                    if (stroke.rebuiltVnChar) {
+                        uic_.rebuildChar(stroke.vn);
+                    } else if (stroke.passThrough) {
                         uic_.putChar(stroke.sym);
                     } else {
                         uic_.filter(stroke.sym);
@@ -739,7 +798,8 @@ void UnikeyState::preedit(KeyEvent &keyEvent, bool allowImmediateCommitForThisKe
                     if (uic_.bufChars() > 0) {
                         result.append(reinterpret_cast<const char *>(uic_.buf()),
                                       uic_.bufChars());
-                    } else if (stroke.sym != FcitxKey_Shift_L &&
+                    } else if (!stroke.rebuiltVnChar &&
+                               stroke.sym != FcitxKey_Shift_L &&
                                stroke.sym != FcitxKey_Shift_R &&
                                stroke.sym != FcitxKey_None) {
                         result.append(utf8::UCS4ToUTF8(stroke.sym));

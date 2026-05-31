@@ -64,22 +64,27 @@ static bool isRebuildableUnicode(uint32_t unicode, RebuildItem &out) {
 static void replayItemsToEngine(UnikeyInputContext &uic,
                                 const std::vector<RebuildItem> &items,
                                 UnikeyState *state,
-                                std::vector<KeySym> &keyStrokes) {
-    size_t itemCount = 0;
+                                std::vector<KeySym> &keyStrokes,
+                                std::vector<UnikeyState::ImmediateCommitKeyStroke>
+                                    *replayStrokes = nullptr) {
     for (const auto &item : items) {
         if (item.isAscii) {
             uic.filter(item.ascii);
             state->syncState(static_cast<KeySym>(item.ascii));
             keyStrokes.push_back(static_cast<KeySym>(item.ascii));
+            if (replayStrokes) {
+                replayStrokes->push_back(
+                    {static_cast<KeySym>(item.ascii), false, false,
+                     vnl_nonVnChar});
+            }
         } else {
             uic.rebuildChar(item.vn);
             state->syncState();
-            // For Vietnamese chars, we don't have a single KeySym that
-            // represents it as a keystroke, but we can use the Unicode value.
-            // However, rebuildChar already updated the engine state.
-            // If we want to support BackSpace, we might need a better way.
+            if (replayStrokes) {
+                replayStrokes->push_back(
+                    {FcitxKey_None, false, true, item.vn});
+            }
         }
-        itemCount++;
     }
 }
 
@@ -454,7 +459,10 @@ size_t UnikeyState::rebuildStateFromSurrounding(bool deleteSurrounding) {
     // ASCII, remember that the displayed preedit may be a converted view of
     // external raw text; the next key decides whether to keep editing that
     // converted view or restore the original raw word before committing.
-    replayItemsToEngine(uic_, items, this, keyStrokes_);
+    std::vector<ImmediateCommitKeyStroke> replayStrokes;
+    replayItemsToEngine(uic_, items, this, keyStrokes_, &replayStrokes);
+    setRebuiltImmediateReplayStrokes(std::move(replayStrokes),
+                                     keyStrokes_.size());
     rawAsciiRebuiltFromSurrounding_ = allItemsAreAscii(items);
 
     if (deleteSurrounding) {
@@ -467,6 +475,8 @@ size_t UnikeyState::rebuildStateFromSurrounding(bool deleteSurrounding) {
 }
 
 size_t UnikeyState::rebuildStateFromLastImmediateWord(bool deleteSurrounding, KeySym upcomingSym) {
+    (void)upcomingSym;
+
     // Don't rebuild if there's an active selection
     if (hasActiveSelection()) {
         return 0;
@@ -509,7 +519,10 @@ size_t UnikeyState::rebuildStateFromLastImmediateWord(bool deleteSurrounding, Ke
     preeditStr_.clear();
     keyStrokes_.clear();
 
-    replayItemsToEngine(uic_, items, this, keyStrokes_);
+    std::vector<ImmediateCommitKeyStroke> replayStrokes;
+    replayItemsToEngine(uic_, items, this, keyStrokes_, &replayStrokes);
+    setRebuiltImmediateReplayStrokes(std::move(replayStrokes),
+                                     keyStrokes_.size());
 
     if (deleteSurrounding) {
         FCITX_UNIKEY_DEBUG()

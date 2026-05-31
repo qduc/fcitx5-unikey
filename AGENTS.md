@@ -147,6 +147,8 @@ scripts/                                - Test automation scripts
   └── ctest_2pass.sh                    - Advanced 2-pass test runner
 ```
 
+Test headers files can be found at `/usr/include/Fcitx5/Module/fcitx-module/testfrontend/`
+
 ## Key Concepts
 
 - **Preedit**: Uncommitted text showing Vietnamese transformations as typed

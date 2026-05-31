@@ -539,7 +539,8 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             env.type(FcitxKey_Shift_R);
             env.type(FcitxKey_Shift_R);
 
-            env.expect("aa ");
+            env.expect("aa");
+            env.expect(" ");
             env.type("space");
         }
 

@@ -45,18 +45,34 @@ cd "$BUILD_DIR"
 
 LOGS_DIR="$BUILD_DIR/.test-logs"
 mkdir -p "$LOGS_DIR"
+PASS1_LOG="$LOGS_DIR/pass1.log"
 
 # Run tests
 echo
 echo "Running tests..."
-if ctest --output-on-failure "$@"; then
+if [[ $VERBOSE -eq 1 ]]; then
+    echo "Verbose mode enabled: showing full CTest output."
+    set +e
+    (cd "$BUILD_DIR" && ctest --output-on-failure "$@") 2>&1 | tee "$PASS1_LOG"
+    pass1_rc=${PIPESTATUS[0]}
+    set -e
+else
+    set +e
+    pass1_output=$(cd "$BUILD_DIR" && ctest -Q "$@" 2>&1)
+    pass1_rc=$?
+    set -e
+    printf '%s\n' "$pass1_output" > "$PASS1_LOG"
+fi
+
+if [[ $pass1_rc -eq 0 ]]; then
     echo
     echo -e "${GREEN}All tests passed!${NC}"
     exit 0
 fi
 
 echo
-echo -e "${YELLOW}Some tests failed. Analyzing...${NC}"
+echo -e "${YELLOW}Some tests failed.${NC}"
+echo "CTest output saved to: $PASS1_LOG"
 
 # Parse failed tests
 mapfile -t failed_tests < <(
@@ -71,11 +87,12 @@ mapfile -t failed_tests < <(
 
 if [[ ${#failed_tests[@]} -eq 0 ]]; then
     echo "Could not determine which tests failed."
+    echo "Inspect: $PASS1_LOG"
     exit 1
 fi
 
 echo
-echo
+echo "Failed tests:"
 for test_name in "${failed_tests[@]}"; do
     echo -e "  ${RED}✗${NC} $test_name"
 done
@@ -97,4 +114,5 @@ done
 
 echo
 echo -e "${RED}Tests failed: ${#failed_tests[@]}${NC}"
+echo "Log: $PASS1_LOG"
 exit 1
