@@ -114,11 +114,12 @@ int findStrokeForVisibleBackspace(size_t strokeCount,
         const size_t prefix = commonUtf8PrefixChars(candidate, target);
         // BackSpace at the end of the word must preserve the visible prefix
         // before the deleted character. If no exact stroke removal exists,
-        // do not choose a same-length candidate that rewrites the beginning of
-        // the word (e.g. VNI "ca12" -> "cà": removing 'c' yields "à").
+        // do not choose a same-length candidate that rewrites any part of that
+        // prefix (e.g. VNI "ca12" -> "cà": removing 'c' yields "à"; after
+        // another BackSpace, "chi2" -> "chì": removing 'h' yields "cì").
         // Let the caller fall back to popping strokes until the visible length
         // shrinks instead.
-        if (targetLen > 0 && prefix == 0) {
+        if (targetLen > 0 && (prefix == 0 || candidateLen >= targetLen)) {
             continue;
         }
         if (bestIdx < 0 || distance < bestDistance ||
@@ -329,6 +330,7 @@ void UnikeyState::clearImmediateCommitSession() {
     immediateCommitWord_.clear();
     immediateCommitWordCharCount_ = 0;
     immediateCommitKeyStrokes_.clear();
+    immediateCommitSnapshots_.clear();
     rebuiltImmediateReplayStrokes_.clear();
     rebuiltImmediateReplayKeyStrokeCount_ = 0;
 }
@@ -381,16 +383,86 @@ bool UnikeyState::restoreImmediateCommitSession() {
         return false;
     }
 
+    return restoreImmediateCommitStrokes(immediateCommitKeyStrokes_);
+}
+
+bool UnikeyState::restoreImmediateCommitStrokes(
+    const std::vector<ImmediateCommitKeyStroke> &strokes,
+    const std::string *expectedVisibleText) {
     uic_.resetBuf();
     preeditStr_.clear();
     keyStrokes_.clear();
 
-    for (const auto &stroke : immediateCommitKeyStrokes_) {
+    for (const auto &stroke : strokes) {
         replayImmediateCommitKeyStroke(stroke);
     }
+    if (expectedVisibleText && preeditStr_ != *expectedVisibleText) {
+        return false;
+    }
+
+    immediateCommitKeyStrokes_ = strokes;
     rebuiltImmediateReplayStrokes_ = immediateCommitKeyStrokes_;
     rebuiltImmediateReplayKeyStrokeCount_ = keyStrokes_.size();
     return true;
+}
+
+void UnikeyState::recordImmediateCommitSnapshot() {
+    if (immediateCommitWord_.empty() || immediateCommitKeyStrokes_.empty()) {
+        return;
+    }
+
+    if (!immediateCommitSnapshots_.empty() &&
+        immediateCommitSnapshots_.back().visibleText == immediateCommitWord_) {
+        immediateCommitSnapshots_.back().strokes = immediateCommitKeyStrokes_;
+        return;
+    }
+
+    immediateCommitSnapshots_.push_back(
+        {immediateCommitWord_, immediateCommitKeyStrokes_});
+}
+
+bool UnikeyState::restoreImmediateCommitSnapshot(
+    const std::string &visibleText) {
+    for (int i = static_cast<int>(immediateCommitSnapshots_.size()) - 1;
+         i >= 0; --i) {
+        if (immediateCommitSnapshots_[i].visibleText != visibleText) {
+            continue;
+        }
+
+        if (!restoreImmediateCommitStrokes(immediateCommitSnapshots_[i].strokes,
+                                           &visibleText)) {
+            return false;
+        }
+        immediateCommitSnapshots_.resize(i + 1);
+        immediateCommitWord_ = preeditStr_;
+        const size_t charLen = utf8::lengthValidated(preeditStr_);
+        immediateCommitWordCharCount_ =
+            charLen == utf8::INVALID_LENGTH ? 0 : charLen;
+        return true;
+    }
+
+    return false;
+}
+
+bool UnikeyState::deriveImmediateCommitSnapshotForVisibleText(
+    const std::string &visibleText) {
+    for (int remIdx = static_cast<int>(immediateCommitKeyStrokes_.size()) - 1;
+         remIdx >= 0; --remIdx) {
+        auto candidate = immediateCommitKeyStrokes_;
+        candidate.erase(candidate.begin() + remIdx);
+        if (!restoreImmediateCommitStrokes(candidate, &visibleText)) {
+            continue;
+        }
+
+        immediateCommitWord_ = preeditStr_;
+        const size_t charLen = utf8::lengthValidated(preeditStr_);
+        immediateCommitWordCharCount_ =
+            charLen == utf8::INVALID_LENGTH ? 0 : charLen;
+        recordImmediateCommitSnapshot();
+        return true;
+    }
+
+    return false;
 }
 
 // Commit text to the document while keeping our expected-cursor belief in sync.
@@ -539,6 +611,7 @@ void UnikeyState::updateImmediateCommitSessionFromPreedit(int forcePassThroughIn
                 {sym, preservePassThrough, false, vnl_nonVnChar});
         }
         immediateCommitKeyStrokes_ = std::move(updatedStrokes);
+        recordImmediateCommitSnapshot();
         return;
     }
 
@@ -562,6 +635,7 @@ void UnikeyState::updateImmediateCommitSessionFromPreedit(int forcePassThroughIn
                 {sym, preservePassThrough, false, vnl_nonVnChar});
         }
         immediateCommitKeyStrokes_ = std::move(updatedStrokes);
+        recordImmediateCommitSnapshot();
         return;
     }
 
@@ -578,6 +652,7 @@ void UnikeyState::updateImmediateCommitSessionFromPreedit(int forcePassThroughIn
             {sym, preservePassThrough, false, vnl_nonVnChar});
     }
     immediateCommitKeyStrokes_ = std::move(updatedStrokes);
+    recordImmediateCommitSnapshot();
 }
 
 /**
@@ -779,71 +854,37 @@ void UnikeyState::preedit(KeyEvent &keyEvent, bool allowImmediateCommitForThisKe
                 currentLen = 0;
             }
 
-            FCITX_UNIKEY_DEBUG() << "[backspace] immediate-commit simulation, currentLen=" << currentLen
-                                 << " strokes=" << immediateCommitKeyStrokes_.size();
+            FCITX_UNIKEY_DEBUG()
+                << "[backspace] immediate-commit visible-state, currentLen="
+                << currentLen << " strokes="
+                << immediateCommitKeyStrokes_.size()
+                << " snapshots=" << immediateCommitSnapshots_.size();
 
-            auto simulateImmediateStrokes = [&](int skipIdx) -> std::string {
-                uic_.resetBuf();
-                std::string result;
-                for (int j = 0; j < (int)immediateCommitKeyStrokes_.size(); j++) {
-                    if (j == skipIdx) continue;
-                    const auto &stroke = immediateCommitKeyStrokes_[j];
-                    if (stroke.rebuiltVnChar) {
-                        uic_.rebuildChar(stroke.vn);
-                    } else if (stroke.passThrough) {
-                        uic_.putChar(stroke.sym);
-                    } else {
-                        uic_.filter(stroke.sym);
-                    }
-                    if (uic_.backspaces() > 0) {
-                        int k = uic_.backspaces();
-                        int i;
-                        for (i = (int)result.length() - 1; i >= 0 && k > 0; i--) {
-                            unsigned char c = (unsigned char)result[i];
-                            if (c < 0x80 || c >= 0xC0) k--;
-                        }
-                        result.erase(i + 1);
-                    }
-                    if (uic_.bufChars() > 0) {
-                        result.append(reinterpret_cast<const char *>(uic_.buf()),
-                                      uic_.bufChars());
-                    } else if (!stroke.rebuiltVnChar &&
-                               stroke.sym != FcitxKey_Shift_L &&
-                               stroke.sym != FcitxKey_Shift_R &&
-                               stroke.sym != FcitxKey_None) {
-                        result.append(utf8::UCS4ToUTF8(stroke.sym));
-                    }
-                }
-                return result;
-            };
-
-            bool removedForTarget = false;
-            int remIdx = findStrokeForVisibleBackspace(
-                immediateCommitKeyStrokes_.size(), preeditStr_,
-                simulateImmediateStrokes);
-            if (remIdx >= 0) {
-                immediateCommitKeyStrokes_.erase(
-                    immediateCommitKeyStrokes_.begin() + remIdx);
-                removedForTarget = true;
+            const std::string target =
+                currentLen == 0 ? std::string()
+                                : removeLastUtf8Char(preeditStr_, currentLen);
+            bool restoredVisibleState = restoreImmediateCommitSnapshot(target);
+            if (!restoredVisibleState) {
+                restoredVisibleState =
+                    deriveImmediateCommitSnapshotForVisibleText(target);
             }
 
-            if (!removedForTarget) {
-                do {
-                    immediateCommitKeyStrokes_.pop_back();
-                    if (currentLen == 0) break;
-                    auto newLen = utf8::lengthValidated(simulateImmediateStrokes(-1));
-                    if (newLen == utf8::INVALID_LENGTH) newLen = 0;
-                    if (newLen < currentLen) break;
-                } while (!immediateCommitKeyStrokes_.empty());
+            if (!restoredVisibleState) {
+                FCITX_UNIKEY_DEBUG()
+                    << "[backspace] no known immediate state for target \""
+                    << target << "\"; rewriting visible text and clearing session";
+                preeditStr_ = target;
+                commitImmediateDiff(oldWord, preeditStr_);
+                clearImmediateCommitSession();
+                reset();
+                keyEvent.filterAndAccept();
+                return;
             }
 
-            FCITX_UNIKEY_DEBUG() << "[backspace] immediate-commit rebuild, remaining strokes=" << immediateCommitKeyStrokes_.size();
-            uic_.resetBuf();
-            preeditStr_.clear();
-            keyStrokes_.clear();
-            for (const auto &stroke : immediateCommitKeyStrokes_) {
-                replayImmediateCommitKeyStroke(stroke);
-            }
+            FCITX_UNIKEY_DEBUG()
+                << "[backspace] immediate-commit restored visible state \""
+                << preeditStr_ << "\" strokes="
+                << immediateCommitKeyStrokes_.size();
 
             commitImmediateDiff(oldWord, preeditStr_);
             updateImmediateCommitSessionFromPreedit();

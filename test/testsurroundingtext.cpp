@@ -1293,6 +1293,31 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
 
             env.expect("c");
             env.type("BackSpace");
+
+            env.resetIC();
+
+            env.expect("c");
+            env.type("c");
+            env.setSurrounding("c", 1);
+            env.expect("ch");
+            env.type("h");
+            env.setSurrounding("ch", 2);
+            env.expect("chi");
+            env.type("i");
+            env.setSurrounding("chi", 3);
+            env.expect("chim");
+            env.type("m");
+            env.setSurrounding("chim", 4);
+            env.expect("chìm");
+            env.type("2");
+            env.setSurrounding("chìm ko moi", 4);
+
+            env.expect("chì");
+            env.type("BackSpace");
+            env.setSurrounding("chì ko moi", 3);
+
+            env.expect("ch");
+            env.type("BackSpace");
         }
 
         instance->deactivate();

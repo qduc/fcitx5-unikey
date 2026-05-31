@@ -30,6 +30,11 @@ public:
         VnLexiName vn = vnl_nonVnChar;
     };
 
+    struct ImmediateCommitSnapshot {
+        std::string visibleText;
+        std::vector<ImmediateCommitKeyStroke> strokes;
+    };
+
     UnikeyState(UnikeyEngine *engine, InputContext *ic);
     ~UnikeyState() = default;
 
@@ -120,6 +125,13 @@ private:
                              const std::string &newWord,
                              KeySym fallbackSym = FcitxKey_None);
     void updateImmediateCommitSessionFromPreedit(int forcePassThroughIndex = -1);
+    void recordImmediateCommitSnapshot();
+    bool restoreImmediateCommitSnapshot(const std::string &visibleText);
+    bool restoreImmediateCommitStrokes(
+        const std::vector<ImmediateCommitKeyStroke> &strokes,
+        const std::string *expectedVisibleText = nullptr);
+    bool deriveImmediateCommitSnapshotForVisibleText(
+        const std::string &visibleText);
     bool hasImmediateCommitSession() const;
     void replayImmediateCommitKeyStroke(const ImmediateCommitKeyStroke &stroke);
     bool tryReeditImmediateFromSurrounding(KeySym sym);
@@ -162,6 +174,7 @@ private:
     std::string immediateCommitWord_;
     size_t immediateCommitWordCharCount_ = 0;
     std::vector<ImmediateCommitKeyStroke> immediateCommitKeyStrokes_;
+    std::vector<ImmediateCommitSnapshot> immediateCommitSnapshots_;
     std::vector<ImmediateCommitKeyStroke> rebuiltImmediateReplayStrokes_;
     size_t rebuiltImmediateReplayKeyStrokeCount_ = 0;
 };
