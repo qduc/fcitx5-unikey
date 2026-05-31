@@ -76,6 +76,37 @@ size_t commonUtf8PrefixChars(const std::string &a, const std::string &b) {
     return count;
 }
 
+size_t commonUtf8PrefixByteLength(const std::string &a,
+                                  const std::string &b) {
+    auto ia = a.begin();
+    auto ib = b.begin();
+    const auto ea = a.end();
+    const auto eb = b.end();
+    size_t bytes = 0;
+
+    while (ia != ea && ib != eb) {
+        uint32_t ca = 0;
+        uint32_t cb = 0;
+        auto na = utf8::getNextChar(ia, ea, &ca);
+        auto nb = utf8::getNextChar(ib, eb, &cb);
+        if (ca == utf8::INVALID_CHAR || ca == utf8::NOT_ENOUGH_SPACE ||
+            cb == utf8::INVALID_CHAR || cb == utf8::NOT_ENOUGH_SPACE ||
+            ca != cb) {
+            break;
+        }
+        ia = na;
+        ib = nb;
+        bytes = static_cast<size_t>(std::distance(a.begin(), ia));
+    }
+
+    return bytes;
+}
+
+bool endsWithBytes(const std::string &text, const std::string &suffix) {
+    return text.size() >= suffix.size() &&
+           text.compare(text.size() - suffix.size(), suffix.size(), suffix) == 0;
+}
+
 template <typename Simulate>
 int findStrokeForVisibleBackspace(size_t strokeCount,
                                   const std::string &currentText,
@@ -202,8 +233,15 @@ void UnikeyState::keyEvent(KeyEvent &keyEvent) {
 }
 
 bool UnikeyState::isUnsupportedSurroundingApp() const {
-    const auto prog = ic_->program();
     // Firefox is now supported via internal state tracking for immediate commit mode.
+    // Chromium-based browsers are not: their URL bars may ignore
+    // deleteSurroundingText() while keeping an autocomplete suffix selected,
+    // which turns rewrites like "ca" -> "cá" into "cacá".
+    if (isChromiumBased()) {
+        return true;
+    }
+
+    const auto prog = ic_->program();
     // Treat various LibreOffice frontends as unsupported for surrounding-text
     // handling due to inconsistent surrounding snapshots.
     if (prog == "libreoffice" || prog == "LibreOffice" ||
@@ -213,6 +251,19 @@ bool UnikeyState::isUnsupportedSurroundingApp() const {
     }
 
     return false;
+}
+
+bool UnikeyState::isChromiumBased() const {
+    const auto prog = ic_->program();
+    return prog == "google-chrome" || prog == "Google Chrome" ||
+           prog == "com.google.Chrome" || prog == "chrome" ||
+           prog == "chromium" || prog == "chromium-browser" ||
+           prog == "org.chromium.Chromium" || prog == "brave" ||
+           prog == "brave-browser" || prog == "com.brave.Browser" ||
+           prog == "microsoft-edge" || prog == "Microsoft Edge" ||
+           prog == "com.microsoft.Edge" || prog == "vivaldi" ||
+           prog == "vivaldi-stable" || prog == "opera" ||
+           prog == "com.opera.Opera";
 }
 
 bool UnikeyState::isFirefox() const {
@@ -353,11 +404,55 @@ bool UnikeyState::canRewriteImmediateCommit() const {
            !isUnsupportedSurroundingApp() && !hasActiveSelection();
 }
 
-bool UnikeyState::canRewriteImmediateCommitSelectionPrefix(
+size_t UnikeyState::immediateCommitSelectionRewriteSize(
     const std::string &oldWord) const {
+    const size_t oldLen = utf8::lengthValidated(oldWord);
     if (oldWord.empty() ||
         !ic_->capabilityFlags().test(CapabilityFlag::SurroundingText) ||
-        isUnsupportedSurroundingApp() || !hasActiveSelection()) {
+        isUnsupportedSurroundingApp() || !hasActiveSelection() ||
+        oldLen == utf8::INVALID_LENGTH) {
+        return 0;
+    }
+
+    const auto &st = ic_->surroundingText();
+    if (!st.isValid()) {
+        return 0;
+    }
+
+    const auto &text = st.text();
+    const auto length = utf8::lengthValidated(text);
+    if (length == utf8::INVALID_LENGTH || st.cursor() > length ||
+        st.anchor() > length || st.cursor() >= st.anchor()) {
+        return 0;
+    }
+
+    auto cursor = utf8::nextNChar(text.begin(), st.cursor());
+    const std::string prefix(text.begin(), cursor);
+    if (prefix.size() < oldWord.size() ||
+        prefix.compare(prefix.size() - oldWord.size(), oldWord.size(),
+                       oldWord) != 0) {
+        return 0;
+    }
+
+    // The selected suffix belongs to the application's autocomplete. A commit
+    // string will replace that selection; deleting across it first can be
+    // ignored by URL bars and leaves the typed prefix in place ("ca" + "cá").
+    return oldLen;
+}
+
+bool UnikeyState::commitFirefoxPartialImmediateDiff(
+    const std::string &oldWord, const std::string &newWord) {
+    if (!isFirefox() || oldWord.empty() || newWord.empty() ||
+        !ic_->capabilityFlags().test(CapabilityFlag::SurroundingText) ||
+        hasActiveSelection()) {
+        return false;
+    }
+
+    const size_t commonBytes = commonUtf8PrefixByteLength(oldWord, newWord);
+    const size_t oldLen = utf8::lengthValidated(oldWord);
+    const size_t commonChars = commonUtf8PrefixChars(oldWord, newWord);
+    if (commonBytes == 0 || commonBytes >= oldWord.size() ||
+        oldLen == utf8::INVALID_LENGTH || commonChars >= oldLen) {
         return false;
     }
 
@@ -365,7 +460,6 @@ bool UnikeyState::canRewriteImmediateCommitSelectionPrefix(
     if (!st.isValid()) {
         return false;
     }
-
     const auto &text = st.text();
     const auto length = utf8::lengthValidated(text);
     if (length == utf8::INVALID_LENGTH || st.cursor() > length) {
@@ -374,9 +468,24 @@ bool UnikeyState::canRewriteImmediateCommitSelectionPrefix(
 
     auto cursor = utf8::nextNChar(text.begin(), st.cursor());
     const std::string prefix(text.begin(), cursor);
-    return prefix.size() >= oldWord.size() &&
-           prefix.compare(prefix.size() - oldWord.size(), oldWord.size(),
-                          oldWord) == 0;
+    const std::string commonPrefix = oldWord.substr(0, commonBytes);
+    if (!endsWithBytes(prefix, oldWord) && !endsWithBytes(prefix, commonPrefix)) {
+        return false;
+    }
+
+    const size_t deleteChars = oldLen - commonChars;
+    const std::string suffix = newWord.substr(commonBytes);
+    FCITX_UNIKEY_DEBUG()
+        << "[commitImmediateDiff] firefox partial rewrite old=\"" << oldWord
+        << "\" new=\"" << newWord << "\" common=\"" << commonPrefix
+        << "\" deleteChars=" << deleteChars << " suffix=\"" << suffix
+        << "\"";
+    deleteSurroundingTextTracked(-static_cast<int>(deleteChars),
+                                 static_cast<int>(deleteChars));
+    if (!suffix.empty()) {
+        commitStringTracked(suffix);
+    }
+    return true;
 }
 
 void UnikeyState::replayImmediateCommitKeyStroke(const ImmediateCommitKeyStroke &stroke) {
@@ -536,6 +645,19 @@ void UnikeyState::commitImmediateDiff(const std::string &oldWord,
         return;
     }
 
+    if (isFirefox() && newWord.size() >= oldWord.size() &&
+        newWord.compare(0, oldWord.size(), oldWord) == 0) {
+        const std::string suffix = newWord.substr(oldWord.size());
+        if (!suffix.empty()) {
+            commitStringTracked(suffix);
+        }
+        return;
+    }
+
+    if (commitFirefoxPartialImmediateDiff(oldWord, newWord)) {
+        return;
+    }
+
     if (!canRewriteImmediateCommit()) {
         if (newWord.size() >= oldWord.size() &&
             newWord.compare(0, oldWord.size(), oldWord) == 0) {
@@ -549,8 +671,11 @@ void UnikeyState::commitImmediateDiff(const std::string &oldWord,
         // Autocomplete-style selection: the existing word prefix is outside the
         // selected suffix. Appends commit only the suffix (above), so the app
         // replaces the selected tail without duplicating the prefix. Only
-        // non-append transformations need delete+rewrite.
-        if (!canRewriteImmediateCommitSelectionPrefix(oldWord)) {
+        // non-append transformations need to delete the prefix before committing
+        // the replacement; the commit itself replaces the selected suffix.
+        const size_t selectionRewriteSize =
+            immediateCommitSelectionRewriteSize(oldWord);
+        if (selectionRewriteSize == 0) {
             if (fallbackSym != FcitxKey_None && fallbackSym != FcitxKey_Shift_L &&
                 fallbackSym != FcitxKey_Shift_R) {
                 FCITX_UNIKEY_DEBUG()
@@ -560,6 +685,18 @@ void UnikeyState::commitImmediateDiff(const std::string &oldWord,
             }
             return;
         }
+
+        const size_t oldLen = utf8::lengthValidated(oldWord);
+        FCITX_UNIKEY_DEBUG()
+            << "[commitImmediateDiff] selection-prefix rewrite old=\""
+            << oldWord << "\" new=\"" << newWord
+            << "\" deleteChars=" << selectionRewriteSize;
+        deleteSurroundingTextTracked(-static_cast<int>(oldLen),
+                                     static_cast<int>(selectionRewriteSize));
+        if (!newWord.empty()) {
+            commitStringTracked(newWord);
+        }
+        return;
     }
 
     const size_t oldLen = utf8::lengthValidated(oldWord);

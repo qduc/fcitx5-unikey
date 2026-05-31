@@ -50,6 +50,9 @@ void printCases() {
     std::cout << "  9: Firefox Telex ASCII append commits suffix\n";
     std::cout << " 10: Firefox Telex tone rewrite commits suffix\n";
     std::cout << " 11: Firefox URL autocomplete selection rewrite\n";
+    std::cout << " 12: Chrome URL bar disables immediate commit rewrite\n";
+    std::cout << " 13: Chrome URL bar survives missing selection metadata\n";
+    std::cout << " 14: Firefox URL bar stale prefix uses partial rewrite\n";
 }
 
 void announceCase(int id) {
@@ -481,6 +484,119 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             icFirefox->updateSurroundingText();
 
             testfrontend->call<ITestFrontend::pushCommitExpectation>("cá");
+            testfrontend->call<ITestFrontend::keyEvent>(uuidFirefox, Key("1"), false);
+        }
+
+        // --- Case 12: Chrome URL bar must not use delete-surrounding rewrites ---
+        if (shouldRunCase(selCopy, 12)) {
+            announceCase(12);
+            FCITX_INFO() << "testfirefox: Case 12 - Chrome URL bar disables immediate commit rewrite";
+
+            auto uuidChrome =
+                testfrontend->call<ITestFrontend::createInputContext>("google-chrome");
+            auto *icChrome =
+                instance->inputContextManager().findByUUID(uuidChrome);
+            FCITX_ASSERT(icChrome);
+            icChrome->setCapabilityFlags(CapabilityFlag::SurroundingText);
+            configureUnikey(unikey, base);
+
+            icChrome->reset();
+            icChrome->surroundingText().setText("", 0, 0);
+            icChrome->updateSurroundingText();
+
+            testfrontend->call<ITestFrontend::keyEvent>(uuidChrome, Key("Control+space"), false);
+
+            // With ImmediateCommit configured globally, Chrome should still use
+            // preedit because Chromium URL bars ignore deleteSurroundingText().
+            // No commits should be produced until the composition is finalized.
+            testfrontend->call<ITestFrontend::keyEvent>(uuidChrome, Key("c"), false);
+            icChrome->surroundingText().setText("chatgpt.com", 1, 11);
+            icChrome->updateSurroundingText();
+
+            testfrontend->call<ITestFrontend::keyEvent>(uuidChrome, Key("a"), false);
+            icChrome->surroundingText().setText("calendar.google.com", 2, 19);
+            icChrome->updateSurroundingText();
+
+            testfrontend->call<ITestFrontend::keyEvent>(uuidChrome, Key("1"), false);
+
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("cá");
+            testfrontend->call<ITestFrontend::keyEvent>(uuidChrome, Key("Return"), false);
+        }
+
+        // --- Case 13: Chrome/Wayland may not report selected autocomplete text ---
+        if (shouldRunCase(selCopy, 13)) {
+            announceCase(13);
+            FCITX_INFO() << "testfirefox: Case 13 - Chrome URL bar survives missing selection metadata";
+
+            auto uuidChrome =
+                testfrontend->call<ITestFrontend::createInputContext>("com.google.Chrome");
+            auto *icChrome =
+                instance->inputContextManager().findByUUID(uuidChrome);
+            FCITX_ASSERT(icChrome);
+            icChrome->setCapabilityFlags(CapabilityFlag::SurroundingText);
+            configureUnikey(unikey, base);
+
+            icChrome->reset();
+            icChrome->surroundingText().setText("", 0, 0);
+            icChrome->updateSurroundingText();
+
+            testfrontend->call<ITestFrontend::keyEvent>(uuidChrome, Key("Control+space"), false);
+
+            testfrontend->call<ITestFrontend::keyEvent>(uuidChrome, Key("c"), false);
+            // The text contains an autocomplete suffix, but cursor==anchor makes
+            // it look like there is no selection. Chromium is still unsupported
+            // for surrounding rewrites, so preedit composition must continue.
+            icChrome->surroundingText().setText("chatgpt.com", 1, 1);
+            icChrome->updateSurroundingText();
+
+            testfrontend->call<ITestFrontend::keyEvent>(uuidChrome, Key("a"), false);
+            icChrome->surroundingText().setText("calendar.google.com", 2, 2);
+            icChrome->updateSurroundingText();
+
+            testfrontend->call<ITestFrontend::keyEvent>(uuidChrome, Key("1"), false);
+
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("cá");
+            testfrontend->call<ITestFrontend::keyEvent>(uuidChrome, Key("Return"), false);
+        }
+
+        // --- Case 14: Firefox URL bar may lag one committed character ---
+        if (shouldRunCase(selCopy, 14)) {
+            announceCase(14);
+            FCITX_INFO() << "testfirefox: Case 14 - Firefox URL bar stale prefix uses partial rewrite";
+
+            auto uuidFirefox =
+                testfrontend->call<ITestFrontend::createInputContext>("firefox");
+            auto *icFirefox =
+                instance->inputContextManager().findByUUID(uuidFirefox);
+            FCITX_ASSERT(icFirefox);
+            icFirefox->setCapabilityFlags(CapabilityFlag::SurroundingText);
+            configureUnikey(unikey, base);
+
+            icFirefox->reset();
+            icFirefox->surroundingText().setText("", 0, 0);
+            icFirefox->updateSurroundingText();
+
+            testfrontend->call<ITestFrontend::keyEvent>(uuidFirefox, Key("Control+space"), false);
+
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("c");
+            testfrontend->call<ITestFrontend::keyEvent>(uuidFirefox, Key("c"), false);
+
+            // Firefox URL-bar autocomplete can report a long suggestion with no
+            // active selection metadata. Appending must not delete+rewrite "c".
+            icFirefox->surroundingText().setText("chat.bhtq.ducnq.com/", 1, 1);
+            icFirefox->updateSurroundingText();
+
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("a");
+            testfrontend->call<ITestFrontend::keyEvent>(uuidFirefox, Key("a"), false);
+
+            // On the tone key Firefox may still report only "c" even though the
+            // engine's current word is "ca". Rewriting the whole word would ask
+            // Firefox to delete two chars from a stale one-char context and can
+            // produce "ccá". Delete only the changed suffix "a" and commit "á".
+            icFirefox->surroundingText().setText("c", 1, 1);
+            icFirefox->updateSurroundingText();
+
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("á");
             testfrontend->call<ITestFrontend::keyEvent>(uuidFirefox, Key("1"), false);
         }
 

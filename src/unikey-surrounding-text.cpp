@@ -428,9 +428,9 @@ size_t UnikeyState::rebuildStateFromSurrounding(bool deleteSurrounding) {
                     << wordUtf8 << "\", last=\"" << lastImmediateWord_
                     << "\"), accepting surrounding";
             } else {
-                if (isUnsupportedSurroundingApp()) {
+                if (isFirefox() || isUnsupportedSurroundingApp()) {
                     FCITX_UNIKEY_DEBUG()
-                        << "[rebuildStateFromSurrounding] Unsupported app (Firefox/LibreOffice) with mismatching surrounding (got=\""
+                        << "[rebuildStateFromSurrounding] Known unreliable app with mismatching surrounding (got=\""
                         << wordUtf8 << "\", last=\"" << lastImmediateWord_
                         << "\"), treating as stale";
                     lastSurroundingRebuildWasStale_ = true;

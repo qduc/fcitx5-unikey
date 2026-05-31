@@ -48,6 +48,7 @@ public:
 
     bool immediateCommitMode() const;
     bool isUnsupportedSurroundingApp() const;
+    bool isChromiumBased() const;
     bool isFirefox() const;
     void eraseChars(int num_chars);
     void reset();
@@ -135,7 +136,9 @@ private:
     bool hasImmediateCommitSession() const;
     void replayImmediateCommitKeyStroke(const ImmediateCommitKeyStroke &stroke);
     bool tryReeditImmediateFromSurrounding(KeySym sym);
-    bool canRewriteImmediateCommitSelectionPrefix(
+    bool commitFirefoxPartialImmediateDiff(const std::string &oldWord,
+                                           const std::string &newWord);
+    size_t immediateCommitSelectionRewriteSize(
         const std::string &oldWord) const;
     void setRebuiltImmediateReplayStrokes(
         std::vector<ImmediateCommitKeyStroke> strokes,
