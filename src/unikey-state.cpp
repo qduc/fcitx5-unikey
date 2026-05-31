@@ -233,10 +233,9 @@ void UnikeyState::keyEvent(KeyEvent &keyEvent) {
 }
 
 bool UnikeyState::isUnsupportedSurroundingApp() const {
-    // Firefox is now supported via internal state tracking for immediate commit mode.
-    // Chromium-based browsers are not: their URL bars may ignore
-    // deleteSurroundingText() while keeping an autocomplete suffix selected,
-    // which turns rewrites like "ca" -> "cá" into "cacá".
+    // Chromium URL bars ignore deleteSurroundingText() while keeping an
+    // autocomplete suffix selected, turning rewrites like "ca" -> "cá" into
+    // "cacá".
     if (isChromiumBased()) {
         return true;
     }

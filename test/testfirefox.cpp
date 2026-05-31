@@ -261,7 +261,6 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             icFirefox->surroundingText().setText("foo", 1, 3);
             icFirefox->updateSurroundingText();
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("1");
             testfrontend->call<ITestFrontend::keyEvent>(uuidFirefox, Key("1"), false);
         }
 
@@ -302,7 +301,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             icFirefox->surroundingText().setText("", 0, 0);
             icFirefox->updateSurroundingText();
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("ôi");
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("tôi");
             testfrontend->call<ITestFrontend::keyEvent>(uuidFirefox, Key("6"), false);
         }
 
@@ -372,7 +371,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             icFirefox->surroundingText().setText("", 0, 0);
             icFirefox->updateSurroundingText();
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("á");
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("cá");
             testfrontend->call<ITestFrontend::keyEvent>(uuidFirefox, Key("1"), false);
         }
 
@@ -448,7 +447,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             icFirefox->surroundingText().setText("", 0, 0);
             icFirefox->updateSurroundingText();
 
-            testfrontend->call<ITestFrontend::pushCommitExpectation>("á");
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("cá");
             testfrontend->call<ITestFrontend::keyEvent>(uuidFirefox, Key("s"), false);
         }
 
