@@ -112,6 +112,15 @@ int findStrokeForVisibleBackspace(size_t strokeCount,
                                     ? candidateLen - targetLen
                                     : targetLen - candidateLen;
         const size_t prefix = commonUtf8PrefixChars(candidate, target);
+        // BackSpace at the end of the word must preserve the visible prefix
+        // before the deleted character. If no exact stroke removal exists,
+        // do not choose a same-length candidate that rewrites the beginning of
+        // the word (e.g. VNI "ca12" -> "cà": removing 'c' yields "à").
+        // Let the caller fall back to popping strokes until the visible length
+        // shrinks instead.
+        if (targetLen > 0 && prefix == 0) {
+            continue;
+        }
         if (bestIdx < 0 || distance < bestDistance ||
             (distance == bestDistance && prefix > bestPrefix)) {
             bestIdx = remIdx;

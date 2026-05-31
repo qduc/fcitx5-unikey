@@ -93,6 +93,7 @@ void printCases() {
     std::cout << " 36: Immediate re-edit: BackSpace to word, then VNI tone\n";
     std::cout << " 37: LibreOffice disables immediate commit fallback to preedit\n";
     std::cout << " 38: Immediate re-edit preserves rebuilt Vietnamese chars\n";
+    std::cout << " 39: Immediate BackSpace preserves prefix when deleting tone-composed char\n";
 }
 
 void announceCase(int id) {
@@ -1259,6 +1260,39 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
 
             env.expect("ánh");
             env.type("1");
+        }
+
+        // --- Case 39: Immediate BackSpace preserves the visible prefix ---
+        // Regression: for VNI "ca12" -> "cà", the stroke-removal fallback
+        // used to remove the leading 'c' because replaying "a12" also has the
+        // target length. BackSpace at "cà|" must delete the character next to
+        // the cursor ('à'), leaving the prefix "c".
+        if (shouldRunCase(selCopy, 39)) {
+            announceCase(39);
+            FCITX_INFO() << "testsurroundingtext: Case 39 - Immediate BackSpace preserves prefix";
+            RawConfig cfg = base;
+            cfg.setValueByPath("ImmediateCommit", "True");
+            cfg.setValueByPath("ModifySurroundingText", "False");
+            cfg.setValueByPath("InputMethod", "VNI");
+            configureUnikey(unikey, cfg);
+
+            env.resetIC();
+
+            env.expect("c");
+            env.type("c");
+            env.setSurrounding("c", 1);
+            env.expect("ca");
+            env.type("a");
+            env.setSurrounding("ca", 2);
+            env.expect("cá");
+            env.type("1");
+            env.setSurrounding("cá", 2);
+            env.expect("cà");
+            env.type("2");
+            env.setSurrounding("cà chim ko moi", 2);
+
+            env.expect("c");
+            env.type("BackSpace");
         }
 
         instance->deactivate();
