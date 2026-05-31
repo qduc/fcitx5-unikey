@@ -310,13 +310,15 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             env.type("1");
         }
 
-        // --- Case 7: Active selection in surrounding is ignored in immediate mode ---
-        // Immediate-commit never reads surrounding text, so it cannot (and does
-        // not) react to an app-reported selection. Composition continues purely
-        // from internal history: after "e", typing "x" extends to "ex".
+        // --- Case 7: Active autocomplete suffix appends only the new suffix ---
+        // When the app reports a selected suffix after the word we just
+        // committed (e.g. URL/search autocomplete), appending must commit only
+        // the suffix so the application replaces the selected tail without
+        // duplicating the prefix. Composition still continues from internal
+        // history: after "e", typing "x" internally extends to "ex".
         if (shouldRunCase(selCopy, 7)) {
             announceCase(7);
-            FCITX_INFO() << "testsurroundingtext: Case 7 - Active selection in surrounding is ignored";
+            FCITX_INFO() << "testsurroundingtext: Case 7 - Active autocomplete suffix appends only suffix";
             RawConfig cfg = base;
             cfg.setValueByPath("ImmediateCommit", "True");
             cfg.setValueByPath("ModifySurroundingText", "False");
@@ -327,7 +329,7 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
             env.expect("e");
             env.type("e");
 
-            // App reports an active selection "xample"; immediate mode ignores it.
+            // App reports an active autocomplete-style selection "xample".
             env.setSurrounding("example", 1, 7);
 
             env.expect("x");

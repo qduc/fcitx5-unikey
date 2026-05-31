@@ -49,6 +49,7 @@ void printCases() {
     std::cout << "  8: Firefox tone rewrite commits suffix (no duplication)\n";
     std::cout << "  9: Firefox Telex ASCII append commits suffix\n";
     std::cout << " 10: Firefox Telex tone rewrite commits suffix\n";
+    std::cout << " 11: Firefox URL autocomplete selection rewrite\n";
 }
 
 void announceCase(int id) {
@@ -446,6 +447,41 @@ void scheduleEvent(EventDispatcher *dispatcher, Instance *instance,
 
             testfrontend->call<ITestFrontend::pushCommitExpectation>("á");
             testfrontend->call<ITestFrontend::keyEvent>(uuidFirefox, Key("s"), false);
+        }
+
+        // --- Case 11: Firefox URL-bar autocomplete keeps a selected suffix ---
+        if (shouldRunCase(selCopy, 11)) {
+            announceCase(11);
+            FCITX_INFO() << "testfirefox: Case 11 - Firefox URL autocomplete selection rewrite";
+
+            auto uuidFirefox =
+                testfrontend->call<ITestFrontend::createInputContext>("firefox");
+            auto *icFirefox =
+                instance->inputContextManager().findByUUID(uuidFirefox);
+            FCITX_ASSERT(icFirefox);
+            icFirefox->setCapabilityFlags(CapabilityFlag::SurroundingText);
+            configureUnikey(unikey, base);
+
+            icFirefox->reset();
+            icFirefox->surroundingText().setText("", 0, 0);
+            icFirefox->updateSurroundingText();
+
+            testfrontend->call<ITestFrontend::keyEvent>(uuidFirefox, Key("Control+space"), false);
+
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("c");
+            testfrontend->call<ITestFrontend::keyEvent>(uuidFirefox, Key("c"), false);
+
+            icFirefox->surroundingText().setText("chatgpt.com", 1, 11);
+            icFirefox->updateSurroundingText();
+
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("a");
+            testfrontend->call<ITestFrontend::keyEvent>(uuidFirefox, Key("a"), false);
+
+            icFirefox->surroundingText().setText("calendar.google.com", 2, 19);
+            icFirefox->updateSurroundingText();
+
+            testfrontend->call<ITestFrontend::pushCommitExpectation>("cá");
+            testfrontend->call<ITestFrontend::keyEvent>(uuidFirefox, Key("1"), false);
         }
 
         instance->deactivate();

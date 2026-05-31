@@ -353,6 +353,32 @@ bool UnikeyState::canRewriteImmediateCommit() const {
            !isUnsupportedSurroundingApp() && !hasActiveSelection();
 }
 
+bool UnikeyState::canRewriteImmediateCommitSelectionPrefix(
+    const std::string &oldWord) const {
+    if (oldWord.empty() ||
+        !ic_->capabilityFlags().test(CapabilityFlag::SurroundingText) ||
+        isUnsupportedSurroundingApp() || !hasActiveSelection()) {
+        return false;
+    }
+
+    const auto &st = ic_->surroundingText();
+    if (!st.isValid()) {
+        return false;
+    }
+
+    const auto &text = st.text();
+    const auto length = utf8::lengthValidated(text);
+    if (length == utf8::INVALID_LENGTH || st.cursor() > length) {
+        return false;
+    }
+
+    auto cursor = utf8::nextNChar(text.begin(), st.cursor());
+    const std::string prefix(text.begin(), cursor);
+    return prefix.size() >= oldWord.size() &&
+           prefix.compare(prefix.size() - oldWord.size(), oldWord.size(),
+                          oldWord) == 0;
+}
+
 void UnikeyState::replayImmediateCommitKeyStroke(const ImmediateCommitKeyStroke &stroke) {
     if (stroke.rebuiltVnChar) {
         FCITX_UNIKEY_DEBUG() << "[replayImmediate] rebuildChar vn=" << stroke.vn;
@@ -520,14 +546,20 @@ void UnikeyState::commitImmediateDiff(const std::string &oldWord,
             return;
         }
 
-        if (fallbackSym != FcitxKey_None && fallbackSym != FcitxKey_Shift_L &&
-            fallbackSym != FcitxKey_Shift_R) {
-            FCITX_UNIKEY_DEBUG()
-                << "[commitImmediateDiff] rewrite unavailable for non-append change; "
-                   "dropping fallback key to avoid raw-key corruption sym="
-                << fallbackSym;
+        // Autocomplete-style selection: the existing word prefix is outside the
+        // selected suffix. Appends commit only the suffix (above), so the app
+        // replaces the selected tail without duplicating the prefix. Only
+        // non-append transformations need delete+rewrite.
+        if (!canRewriteImmediateCommitSelectionPrefix(oldWord)) {
+            if (fallbackSym != FcitxKey_None && fallbackSym != FcitxKey_Shift_L &&
+                fallbackSym != FcitxKey_Shift_R) {
+                FCITX_UNIKEY_DEBUG()
+                    << "[commitImmediateDiff] rewrite unavailable for non-append change; "
+                       "dropping fallback key to avoid raw-key corruption sym="
+                    << fallbackSym;
+            }
+            return;
         }
-        return;
     }
 
     const size_t oldLen = utf8::lengthValidated(oldWord);
@@ -1101,7 +1133,7 @@ void UnikeyState::preedit(KeyEvent &keyEvent, bool allowImmediateCommitForThisKe
                              << " bufChars=" << uic_.bufChars() << " preedit=\"" << preeditStr_ << "\"";
 
         if (immediateCommit) {
-            FCITX_UNIKEY_DEBUG() << "[preedit] ImmediateCommit: committing \"" << preeditStr_ << "\"";
+            FCITX_UNIKEY_DEBUG() << "[preedit] ImmediateCommit: applying \"" << preeditStr_ << "\"";
             commitImmediateDiff(oldImmediateWord, preeditStr_, sym);
             updateImmediateCommitSessionFromPreedit();
             reset();

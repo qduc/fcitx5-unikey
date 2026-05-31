@@ -135,6 +135,8 @@ private:
     bool hasImmediateCommitSession() const;
     void replayImmediateCommitKeyStroke(const ImmediateCommitKeyStroke &stroke);
     bool tryReeditImmediateFromSurrounding(KeySym sym);
+    bool canRewriteImmediateCommitSelectionPrefix(
+        const std::string &oldWord) const;
     void setRebuiltImmediateReplayStrokes(
         std::vector<ImmediateCommitKeyStroke> strokes,
         size_t keyStrokeCount);
